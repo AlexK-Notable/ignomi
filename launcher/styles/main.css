@@ -1,0 +1,167 @@
+/* Ignomi Launcher - Main Stylesheet */
+
+/* Panel containers */
+.panel {
+    background-color: alpha(@bg, 0.95);
+    color: @fg;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 8px;
+}
+
+.panel-header {
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 12px;
+    padding: 8px 0;
+}
+
+/* App list containers */
+.app-list {
+    background-color: transparent;
+}
+
+/* App item buttons */
+.app-item {
+    background-color: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 12px;
+    margin: 2px 0;
+    transition: all 0.15s ease;
+}
+
+.app-item:hover {
+    background-color: alpha(@accent, 0.25);
+    transform: translateX(2px);
+}
+
+.app-item:active {
+    background-color: alpha(@accent, 0.4);
+    transform: scale(0.98);
+}
+
+/* Drag-and-drop feedback */
+.app-item.drag-hover {
+    border-top: 2px solid @accent;
+    padding-top: 10px;
+}
+
+/* App icons */
+.app-icon {
+    margin-right: 4px;
+}
+
+/* App text labels */
+.app-name {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.app-description {
+    font-size: 11px;
+    color: alpha(@fg, 0.7);
+    margin-bottom: 2px;
+}
+
+.frecency-count {
+    font-size: 10px;
+    color: alpha(@fg, 0.5);
+    font-style: italic;
+    margin-top: 4px;
+}
+
+/* Search panel specific */
+.search-panel {
+    min-width: 500px;
+    max-width: 600px;
+}
+
+.search-entry {
+    font-size: 16px;
+    padding: 14px 18px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    background-color: alpha(@bg, 0.6);
+    color: @fg;
+    border: 1px solid alpha(@accent, 0.3);
+    transition: border-color 0.2s ease;
+}
+
+.search-entry:focus {
+    border-color: @accent;
+    background-color: alpha(@bg, 0.8);
+}
+
+.search-results {
+    max-height: 600px;
+}
+
+.result-item {
+    padding: 10px 12px;
+}
+
+/* Empty state */
+.empty-state {
+    padding: 40px 20px;
+    color: alpha(@fg, 0.5);
+    font-size: 13px;
+}
+
+/* Scrollbars */
+scrollbar {
+    background-color: transparent;
+    border-radius: 8px;
+}
+
+scrollbar slider {
+    background-color: alpha(@fg, 0.3);
+    border-radius: 8px;
+    min-width: 8px;
+    min-height: 40px;
+    margin: 2px;
+}
+
+scrollbar slider:hover {
+    background-color: alpha(@fg, 0.5);
+}
+
+/* Animations */
+@keyframes bookmark-pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+        background-color: alpha(@success, 0.5);
+    }
+}
+
+.bookmark-added {
+    animation: bookmark-pulse 0.3s ease;
+}
+
+/* Panel-specific adjustments */
+.bookmarks-panel,
+.frequent-panel {
+    min-width: 300px;
+    max-width: 320px;
+}
+
+/* Ensure proper spacing */
+box {
+    margin: 0;
+    padding: 0;
+}
+
+/* Button reset */
+button {
+    background: none;
+    border: none;
+    outline: none;
+}
+
+button:focus {
+    outline: none;
+}
