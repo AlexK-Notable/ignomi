@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Ignis
+.ignis/
+
+# Generated CSS (symlinked from Wallust)
+launcher/styles/colors.css
+
+# Frecency database
+*.db
+*.db-journal
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+
+# User data (keep templates, ignore user instances)
+launcher/data/bookmarks.json
+launcher/data/settings.toml
+
+# Keep example configs
+!launcher/data/bookmarks.json.example
+!launcher/data/settings.toml.example
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
