@@ -9,7 +9,7 @@ Features:
 - Keyboard navigation (arrow keys, Enter to launch)
 """
 
-from ignis.widgets import Widget
+from ignis import widgets
 from ignis.services.applications import ApplicationsService
 from gi.repository import Gtk
 import sys
@@ -42,17 +42,17 @@ class SearchPanel:
         Create the search panel window.
 
         Returns:
-            Widget.Window positioned at top center
+            widgets.Window positioned at top center
         """
         # Search entry
-        self.search_entry = Widget.Entry(
+        self.search_entry = widgets.Entry(
             placeholder_text="Search applications...",
             css_classes=["search-entry"],
             on_change=lambda x: self._on_search_changed()
         )
 
         # Results container
-        self.results_box = Widget.Box(
+        self.results_box = widgets.Box(
             vertical=True,
             spacing=2,
             css_classes=["search-results"]
@@ -61,30 +61,37 @@ class SearchPanel:
         # Initial population
         self._update_results()
 
-        return Widget.Window(
+        window = widgets.Window(
             namespace="ignomi-search",
             monitor=0,
             anchor=["top"],
-            exclusive=False,
-            keyboard_mode="exclusive",  # Gets keyboard focus
+            exclusivity="normal",
+            kb_mode="on_demand",  # Allow interaction while focused
             layer="top",
-            child=Widget.Box(
+            default_width=600,
+            default_height=700,
+            child=widgets.Box(
                 vertical=True,
                 css_classes=["panel", "search-panel"],
                 child=[
                     # Search entry
                     self.search_entry,
                     # Scrollable results
-                    Widget.ScrolledWindow(
+                    widgets.Scroll(
                         vexpand=True,
                         hexpand=True,
-                        min_content_width=480,
-                        max_content_height=600,
                         child=self.results_box
                     )
                 ]
             )
         )
+
+        # Add Escape key handler to close launcher
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_press)
+        window.add_controller(key_controller)
+
+        return window
 
     def _on_search_changed(self):
         """Handle search entry text changes."""
@@ -104,9 +111,12 @@ class SearchPanel:
 
     def _update_results(self):
         """Rebuild results list from filtered apps."""
-        # Clear existing
-        for child in self.results_box.get_children():
+        # Clear existing (GTK4 way)
+        child = self.results_box.get_first_child()
+        while child:
+            next_child = child.get_next_sibling()
             self.results_box.remove(child)
+            child = next_child
 
         # Add result buttons
         for app in self.filtered_apps[:30]:  # Max 30 results
@@ -121,34 +131,34 @@ class SearchPanel:
             app: Application object
 
         Returns:
-            Widget.Button with icon and label
+            widgets.Button with icon and label
         """
-        button = Widget.Button(
+        button = widgets.Button(
             css_classes=["app-item", "result-item"],
             on_click=lambda x, app=app: self._on_app_click(app),
-            child=Widget.Box(
+            child=widgets.Box(
                 spacing=12,
                 child=[
                     # App icon
-                    Widget.Icon(
+                    widgets.Icon(
                         image=app.icon,
                         pixel_size=32,
                         css_classes=["app-icon"]
                     ),
                     # App name and description
-                    Widget.Box(
+                    widgets.Box(
                         vertical=True,
                         vexpand=True,
                         valign="center",
                         child=[
-                            Widget.Label(
+                            widgets.Label(
                                 label=app.name,
                                 css_classes=["app-name"],
                                 halign="start",
                                 ellipsize="end",
                                 max_width_chars=40
                             ),
-                            Widget.Label(
+                            widgets.Label(
                                 label=app.description or "",
                                 css_classes=["app-description"],
                                 halign="start",
@@ -184,3 +194,13 @@ class SearchPanel:
             # TODO: Visual feedback (pulse animation)
             # For now, just print confirmation
             print(f"Added {app.name} to bookmarks")
+
+    def _on_key_press(self, controller, keyval, keycode, state):
+        """Handle keyboard events - close on Escape."""
+        from gi.repository import Gdk
+        from utils.helpers import close_launcher
+
+        if keyval == Gdk.KEY_Escape:
+            close_launcher()
+            return True
+        return False
