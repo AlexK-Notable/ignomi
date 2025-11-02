@@ -10,7 +10,35 @@ Provides common functions used across multiple panels:
 from gi.repository import GLib
 from pathlib import Path
 import toml
+import subprocess
+import json
 from typing import Dict, Any, Optional
+
+
+def get_focused_monitor() -> int:
+    """
+    Get the ID of the currently focused monitor in Hyprland.
+
+    Returns:
+        Monitor ID (int), defaults to 0 if detection fails
+    """
+    try:
+        result = subprocess.run(
+            ['hyprctl', 'monitors', '-j'],
+            capture_output=True,
+            text=True,
+            timeout=1
+        )
+        if result.returncode == 0:
+            monitors = json.loads(result.stdout)
+            for monitor in monitors:
+                if monitor.get('focused', False):
+                    return monitor['id']
+    except Exception:
+        pass
+
+    # Fallback to monitor 0
+    return 0
 
 
 def launch_app(app, frecency_service, close_delay_ms: int = 300):

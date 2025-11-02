@@ -15,7 +15,7 @@ from gi.repository import Gtk
 import sys
 sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
 
-from utils.helpers import launch_app, add_bookmark, is_bookmarked
+from utils.helpers import launch_app, add_bookmark, is_bookmarked, get_focused_monitor
 from services.frecency import get_frecency_service
 
 
@@ -63,7 +63,7 @@ class SearchPanel:
 
         window = widgets.Window(
             namespace="ignomi-search",
-            monitor=0,
+            monitor=get_focused_monitor(),
             anchor=["top"],
             exclusivity="normal",
             kb_mode="on_demand",  # Allow interaction while focused
@@ -90,6 +90,9 @@ class SearchPanel:
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", self._on_key_press)
         window.add_controller(key_controller)
+
+        # Add signal handler to update monitor when window becomes visible
+        window.connect("notify::visible", self._on_visibility_changed)
 
         return window
 
@@ -194,6 +197,14 @@ class SearchPanel:
             # TODO: Visual feedback (pulse animation)
             # For now, just print confirmation
             print(f"Added {app.name} to bookmarks")
+
+    def _on_visibility_changed(self, window, param):
+        """Update monitor placement when window becomes visible."""
+        if window.get_visible():
+            # Window is being shown - update to current focused monitor
+            focused = get_focused_monitor()
+            if window.monitor != focused:
+                window.monitor = focused
 
     def _on_key_press(self, controller, keyval, keycode, state):
         """Handle keyboard events - close on Escape."""

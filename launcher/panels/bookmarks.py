@@ -9,13 +9,13 @@ Features:
 - Auto-saves changes
 """
 
-from ignis.widgets import Widget
+from ignis import widgets
 from ignis.services.applications import ApplicationsService
 from gi.repository import Gtk, Gdk, GObject
 import sys
 sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
 
-from utils.helpers import load_bookmarks, save_bookmarks, launch_app, remove_bookmark
+from utils.helpers import load_bookmarks, save_bookmarks, launch_app, remove_bookmark, get_focused_monitor
 from services.frecency import get_frecency_service
 
 
@@ -66,10 +66,10 @@ class BookmarksPanel:
         Create the bookmarks panel window.
 
         Returns:
-            Widget.Window positioned on left edge
+            widgets.Window positioned on left edge
         """
         # Create scrollable app list
-        self.app_list_box = Widget.Box(
+        self.app_list_box = widgets.Box(
             vertical=True,
             spacing=4,
             css_classes=["app-list"]
@@ -78,25 +78,26 @@ class BookmarksPanel:
         # Populate with bookmark buttons
         self._refresh_app_list()
 
-        return Widget.Window(
+        window = widgets.Window(
             namespace="ignomi-bookmarks",
-            monitor=0,
+            monitor=get_focused_monitor(),
             anchor=["left", "top", "bottom"],
-            exclusive=True,
-            keyboard_mode="none",
+            exclusivity="exclusive",
+            kb_mode="on_demand",  # Allow mouse interaction
             layer="top",
-            child=Widget.Box(
+            default_width=320,
+            child=widgets.Box(
                 vertical=True,
                 css_classes=["panel", "bookmarks-panel"],
                 child=[
                     # Header
-                    Widget.Label(
+                    widgets.Label(
                         label="Bookmarks",
                         css_classes=["panel-header"],
                         halign="start"
                     ),
                     # Scrollable app list
-                    Widget.ScrolledWindow(
+                    widgets.Scroll(
                         vexpand=True,
                         hexpand=True,
                         min_content_width=280,
@@ -106,11 +107,19 @@ class BookmarksPanel:
             )
         )
 
+        # Add signal handler to update monitor when window becomes visible
+        window.connect("notify::visible", self._on_visibility_changed)
+
+        return window
+
     def _refresh_app_list(self):
         """Rebuild the app list from current bookmarks."""
-        # Clear existing
-        for child in self.app_list_box.get_children():
+        # Clear existing (GTK4 way)
+        child = self.app_list_box.get_first_child()
+        while child:
+            next_child = child.get_next_sibling()
             self.app_list_box.remove(child)
+            child = next_child
 
         # Add bookmark buttons
         for index, app in enumerate(self.bookmarks):
@@ -126,35 +135,35 @@ class BookmarksPanel:
             index: Position in bookmark list
 
         Returns:
-            Widget.Button with icon, label, and drag-drop
+            widgets.Button with icon, label, and drag-drop
         """
         # Main button
-        button = Widget.Button(
+        button = widgets.Button(
             css_classes=["app-item"],
             on_click=lambda x, app=app: self._on_app_click(app),
-            child=Widget.Box(
+            child=widgets.Box(
                 spacing=12,
                 child=[
                     # App icon
-                    Widget.Icon(
+                    widgets.Icon(
                         image=app.icon,
                         pixel_size=48,
                         css_classes=["app-icon"]
                     ),
                     # App name and description
-                    Widget.Box(
+                    widgets.Box(
                         vertical=True,
                         vexpand=True,
                         valign="center",
                         child=[
-                            Widget.Label(
+                            widgets.Label(
                                 label=app.name,
                                 css_classes=["app-name"],
                                 halign="start",
                                 ellipsize="end",
                                 max_width_chars=20
                             ),
-                            Widget.Label(
+                            widgets.Label(
                                 label=app.description or "",
                                 css_classes=["app-description"],
                                 halign="start",
@@ -263,3 +272,11 @@ class BookmarksPanel:
     def _on_drop_leave(self, button):
         """Remove visual feedback when drag leaves."""
         button.remove_css_class("drag-hover")
+
+    def _on_visibility_changed(self, window, param):
+        """Update monitor placement when window becomes visible."""
+        if window.get_visible():
+            # Window is being shown - update to current focused monitor
+            focused = get_focused_monitor()
+            if window.monitor != focused:
+                window.monitor = focused

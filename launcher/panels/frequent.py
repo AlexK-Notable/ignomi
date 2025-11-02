@@ -8,13 +8,13 @@ Features:
 - Right-click to add to bookmarks
 """
 
-from ignis.widgets import Widget
+from ignis import widgets
 from ignis.services.applications import ApplicationsService
 from gi.repository import Gtk
 import sys
 sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
 
-from utils.helpers import launch_app, add_bookmark, is_bookmarked, load_settings
+from utils.helpers import launch_app, add_bookmark, is_bookmarked, load_settings, get_focused_monitor
 from services.frecency import get_frecency_service
 
 
@@ -75,10 +75,10 @@ class FrequentPanel:
         Create the frequent apps panel window.
 
         Returns:
-            Widget.Window positioned on right edge
+            widgets.Window positioned on right edge
         """
         # Create app list container
-        self.app_list_box = Widget.Box(
+        self.app_list_box = widgets.Box(
             vertical=True,
             spacing=4,
             css_classes=["app-list"]
@@ -87,25 +87,26 @@ class FrequentPanel:
         # Populate with frequent apps
         self._refresh_app_list()
 
-        return Widget.Window(
+        window = widgets.Window(
             namespace="ignomi-frequent",
-            monitor=0,
+            monitor=get_focused_monitor(),
             anchor=["right", "top", "bottom"],
-            exclusive=True,
-            keyboard_mode="none",
+            exclusivity="exclusive",
+            kb_mode="on_demand",  # Allow mouse interaction
             layer="top",
-            child=Widget.Box(
+            default_width=320,
+            child=widgets.Box(
                 vertical=True,
                 css_classes=["panel", "frequent-panel"],
                 child=[
                     # Header
-                    Widget.Label(
+                    widgets.Label(
                         label="Frequent",
                         css_classes=["panel-header"],
                         halign="start"
                     ),
                     # Scrollable app list
-                    Widget.ScrolledWindow(
+                    widgets.Scroll(
                         vexpand=True,
                         hexpand=True,
                         min_content_width=280,
@@ -115,6 +116,11 @@ class FrequentPanel:
             )
         )
 
+        # Add signal handler to update monitor when window becomes visible
+        window.connect("notify::visible", self._on_visibility_changed)
+
+        return window
+
     def _refresh_apps(self):
         """Callback when frecency data changes."""
         self.top_apps = self._get_top_apps()
@@ -122,9 +128,12 @@ class FrequentPanel:
 
     def _refresh_app_list(self):
         """Rebuild the app list from current top apps."""
-        # Clear existing
-        for child in self.app_list_box.get_children():
+        # Clear existing (GTK4 way)
+        child = self.app_list_box.get_first_child()
+        while child:
+            next_child = child.get_next_sibling()
             self.app_list_box.remove(child)
+            child = next_child
 
         # Add frequent app buttons
         if self.top_apps:
@@ -133,7 +142,7 @@ class FrequentPanel:
                 self.app_list_box.append(button)
         else:
             # Show empty state
-            empty_label = Widget.Label(
+            empty_label = widgets.Label(
                 label="No frequent apps yet\n\nLaunch apps to build history",
                 css_classes=["empty-state"],
                 justify="center"
@@ -149,41 +158,41 @@ class FrequentPanel:
             launch_count: Number of times launched
 
         Returns:
-            Widget.Button with icon, label, and usage badge
+            widgets.Button with icon, label, and usage badge
         """
-        button = Widget.Button(
+        button = widgets.Button(
             css_classes=["app-item"],
             on_click=lambda x, app=app: self._on_app_click(app),
-            child=Widget.Box(
+            child=widgets.Box(
                 spacing=12,
                 child=[
                     # App icon
-                    Widget.Icon(
+                    widgets.Icon(
                         image=app.icon,
                         pixel_size=48,
                         css_classes=["app-icon"]
                     ),
                     # App name, description, and count
-                    Widget.Box(
+                    widgets.Box(
                         vertical=True,
                         vexpand=True,
                         valign="center",
                         child=[
-                            Widget.Label(
+                            widgets.Label(
                                 label=app.name,
                                 css_classes=["app-name"],
                                 halign="start",
                                 ellipsize="end",
                                 max_width_chars=20
                             ),
-                            Widget.Label(
+                            widgets.Label(
                                 label=app.description or "",
                                 css_classes=["app-description"],
                                 halign="start",
                                 ellipsize="end",
                                 max_width_chars=25
                             ),
-                            Widget.Label(
+                            widgets.Label(
                                 label=f"Launched {launch_count}× ",
                                 css_classes=["frecency-count"],
                                 halign="start"
@@ -215,3 +224,11 @@ class FrequentPanel:
             # TODO: Visual feedback (pulse animation)
             # For now, just print confirmation
             print(f"Added {app.name} to bookmarks")
+
+    def _on_visibility_changed(self, window, param):
+        """Update monitor placement when window becomes visible."""
+        if window.get_visible():
+            # Window is being shown - update to current focused monitor
+            focused = get_focused_monitor()
+            if window.monitor != focused:
+                window.monitor = focused
