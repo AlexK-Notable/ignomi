@@ -15,14 +15,14 @@ This ensures recently-used apps rank higher than frequently-but-old apps.
 """
 
 from gi.repository import GObject
-from ignis.service import Service
+from ignis.base_service import BaseService
 import sqlite3
 import time
 from pathlib import Path
 from typing import List, Tuple, Optional
 
 
-class FrecencyService(Service):
+class FrecencyService(BaseService):
     """
     Service for tracking application usage and calculating frecency scores.
 

@@ -1,10 +1,17 @@
 /* Ignomi Launcher - Main Stylesheet */
 
+/* Window must be transparent for RGBA backgrounds to work */
+window {
+    background: transparent;
+}
+
 /* Panel containers */
 .panel {
-    background-color: alpha(@bg, 0.95);
+    background-color: @bg_75;
     color: @fg;
     border-radius: 12px;
+    border: 1px solid @accent_30;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     padding: 16px;
     margin: 8px;
 }
@@ -32,12 +39,12 @@
 }
 
 .app-item:hover {
-    background-color: alpha(@accent, 0.25);
+    background-color: @color4_30;
     transform: translateX(2px);
 }
 
 .app-item:active {
-    background-color: alpha(@accent, 0.4);
+    background-color: @color6_50;
     transform: scale(0.98);
 }
 
@@ -61,13 +68,13 @@
 
 .app-description {
     font-size: 11px;
-    color: alpha(@fg, 0.7);
+    color: @fg_70;
     margin-bottom: 2px;
 }
 
 .frecency-count {
     font-size: 10px;
-    color: alpha(@fg, 0.5);
+    color: @fg_50;
     font-style: italic;
     margin-top: 4px;
 }
@@ -75,7 +82,6 @@
 /* Search panel specific */
 .search-panel {
     min-width: 500px;
-    max-width: 600px;
 }
 
 .search-entry {
@@ -83,19 +89,20 @@
     padding: 14px 18px;
     margin-bottom: 12px;
     border-radius: 8px;
-    background-color: alpha(@bg, 0.6);
+    background-color: @bg_60;
     color: @fg;
-    border: 1px solid alpha(@accent, 0.3);
-    transition: border-color 0.2s ease;
+    border: 1px solid @color4_40;
+    transition: all 0.2s ease;
 }
 
 .search-entry:focus {
-    border-color: @accent;
-    background-color: alpha(@bg, 0.8);
+    border-color: @color6;
+    background-color: @bg_80;
+    box-shadow: 0 0 8px @color6_30;
 }
 
 .search-results {
-    max-height: 600px;
+    /* Size controlled by ScrolledWindow in Python */
 }
 
 .result-item {
@@ -105,26 +112,27 @@
 /* Empty state */
 .empty-state {
     padding: 40px 20px;
-    color: alpha(@fg, 0.5);
+    color: @fg_50;
     font-size: 13px;
 }
 
 /* Scrollbars */
 scrollbar {
-    background-color: transparent;
+    background-color: @color0_20;
     border-radius: 8px;
 }
 
 scrollbar slider {
-    background-color: alpha(@fg, 0.3);
+    background-color: @color4_40;
     border-radius: 8px;
     min-width: 8px;
     min-height: 40px;
     margin: 2px;
+    transition: background-color 0.15s ease;
 }
 
 scrollbar slider:hover {
-    background-color: alpha(@fg, 0.5);
+    background-color: @color6_60;
 }
 
 /* Animations */
@@ -134,7 +142,7 @@ scrollbar slider:hover {
     }
     50% {
         opacity: 0.6;
-        background-color: alpha(@success, 0.5);
+        background-color: @success_50;
     }
 }
 
@@ -146,7 +154,6 @@ scrollbar slider:hover {
 .bookmarks-panel,
 .frequent-panel {
     min-width: 300px;
-    max-width: 320px;
 }
 
 /* Ensure proper spacing */
