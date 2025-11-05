@@ -10,7 +10,7 @@ Features:
 
 from ignis import widgets
 from ignis.services.applications import ApplicationsService
-from gi.repository import Gtk
+from gi.repository import Gtk, GLib
 import sys
 sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
 
@@ -206,7 +206,7 @@ class FrequentPanel:
         # Add right-click handler (add to bookmarks)
         gesture = Gtk.GestureClick()
         gesture.set_button(3)  # Right click
-        gesture.connect("pressed", lambda g, n, x, y, app=app: self._on_right_click(app))
+        gesture.connect("pressed", lambda g, n, x, y, app=app, btn=button: self._on_right_click(app, btn))
         button.add_controller(gesture)
 
         return button
@@ -216,13 +216,17 @@ class FrequentPanel:
         close_delay = self.settings["launcher"]["close_delay_ms"]
         launch_app(app, self.frecency, close_delay)
 
-    def _on_right_click(self, app):
+    def _on_right_click(self, app, button):
         """Add app to bookmarks on right-click."""
         if not is_bookmarked(app.id):
             add_bookmark(app.id)
 
-            # TODO: Visual feedback (pulse animation)
-            # For now, just print confirmation
+            # Visual feedback: Add pulse animation CSS class
+            button.add_css_class("bookmark-added")
+
+            # Remove the CSS class after animation completes (300ms)
+            GLib.timeout_add(300, lambda: button.remove_css_class("bookmark-added"))
+
             print(f"Added {app.name} to bookmarks")
 
     def _on_visibility_changed(self, window, param):
