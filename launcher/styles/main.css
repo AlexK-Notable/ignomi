@@ -79,6 +79,16 @@ window {
     margin-top: 4px;
 }
 
+/* Search panel larger text */
+.search-app-name {
+    font-size: 16px;  /* Larger than default 14px */
+    font-weight: 600;
+}
+
+.search-app-description {
+    font-size: 13px;  /* Larger than default 11px */
+}
+
 /* Search panel specific */
 .search-panel {
     min-width: 500px;
@@ -107,6 +117,12 @@ window {
 
 .result-item {
     padding: 10px 12px;
+}
+
+/* Keyboard navigation highlight */
+.keyboard-selected {
+    background-color: @color6_40;
+    border-left: 3px solid @color6;
 }
 
 /* Empty state */

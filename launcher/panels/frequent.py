@@ -14,7 +14,7 @@ from gi.repository import Gtk, GLib
 import sys
 sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
 
-from utils.helpers import launch_app, add_bookmark, is_bookmarked, load_settings, get_focused_monitor
+from utils.helpers import launch_app, add_bookmark, is_bookmarked, load_settings, get_monitor_under_cursor
 from services.frecency import get_frecency_service
 
 
@@ -89,7 +89,7 @@ class FrequentPanel:
 
         window = widgets.Window(
             namespace="ignomi-frequent",
-            monitor=get_focused_monitor(),
+            monitor=get_monitor_under_cursor(),
             anchor=["right", "top", "bottom"],
             exclusivity="exclusive",
             kb_mode="on_demand",  # Allow mouse interaction
@@ -232,7 +232,7 @@ class FrequentPanel:
     def _on_visibility_changed(self, window, param):
         """Update monitor placement when window becomes visible."""
         if window.get_visible():
-            # Window is being shown - update to current focused monitor
-            focused = get_focused_monitor()
-            if window.monitor != focused:
-                window.monitor = focused
+            # Window is being shown - update to monitor under cursor
+            cursor_monitor = get_monitor_under_cursor()
+            if window.monitor != cursor_monitor:
+                window.monitor = cursor_monitor

@@ -41,6 +41,122 @@ def get_focused_monitor() -> int:
     return 0
 
 
+def hyprland_monitor_to_ignis_monitor(hyprland_id: int) -> int:
+    """
+    Convert Hyprland monitor ID to Ignis/GTK monitor ID.
+
+    Hyprland and GTK enumerate monitors in different orders. This function
+    translates by matching connector names.
+
+    Args:
+        hyprland_id: Monitor ID from Hyprland
+
+    Returns:
+        Corresponding Ignis/GTK monitor ID, or 0 if not found
+    """
+    try:
+        # Get Hyprland monitor info
+        result = subprocess.run(
+            ['hyprctl', 'monitors', '-j'],
+            capture_output=True,
+            text=True,
+            timeout=1
+        )
+        if result.returncode != 0:
+            return 0
+
+        hyprland_monitors = json.loads(result.stdout)
+
+        # Find connector name for this Hyprland ID
+        connector_name = None
+        for monitor in hyprland_monitors:
+            if monitor['id'] == hyprland_id:
+                connector_name = monitor['name']
+                break
+
+        if not connector_name:
+            return 0
+
+        # Now find which GTK monitor has this connector
+        from gi.repository import Gdk
+        display = Gdk.Display.get_default()
+        if not display:
+            return 0
+
+        monitors = display.get_monitors()
+        for i in range(monitors.get_n_items()):
+            monitor = monitors.get_item(i)
+            gtk_connector = monitor.get_connector()
+            if gtk_connector == connector_name:
+                return i
+
+        return 0
+
+    except Exception:
+        return 0
+
+
+def get_monitor_under_cursor() -> int:
+    """
+    Get the ID of the monitor where the cursor is currently located.
+
+    Uses hyprctl to get cursor position and monitor geometries,
+    then determines which monitor contains the cursor.
+
+    Returns:
+        Monitor ID (int), defaults to 0 if detection fails
+    """
+    try:
+        # Get cursor position
+        cursor_result = subprocess.run(
+            ['hyprctl', 'cursorpos'],
+            capture_output=True,
+            text=True,
+            timeout=1
+        )
+        if cursor_result.returncode != 0:
+            return 0
+
+        # Parse cursor position (format: "x, y")
+        cursor_pos = cursor_result.stdout.strip().split(', ')
+        if len(cursor_pos) != 2:
+            return 0
+        cursor_x = int(cursor_pos[0])
+        cursor_y = int(cursor_pos[1])
+
+        # Get monitor geometries
+        monitors_result = subprocess.run(
+            ['hyprctl', 'monitors', '-j'],
+            capture_output=True,
+            text=True,
+            timeout=1
+        )
+        if monitors_result.returncode != 0:
+            return 0
+
+        monitors = json.loads(monitors_result.stdout)
+
+        # Find which monitor contains the cursor
+        for monitor in monitors:
+            x = monitor['x']
+            y = monitor['y']
+            width = monitor['width']
+            height = monitor['height']
+            mon_id = monitor['id']
+
+            # Check if cursor is within this monitor's bounds
+            if x <= cursor_x < x + width and y <= cursor_y < y + height:
+                # Translate Hyprland ID to Ignis ID
+                ignis_id = hyprland_monitor_to_ignis_monitor(mon_id)
+                return ignis_id
+
+    except Exception:
+        pass
+
+    # Fallback to monitor 0
+    return 0
+
+
 def launch_app(app, frecency_service, close_delay_ms: int = 300):
     """
     Launch an application, record in frecency, and auto-close launcher.

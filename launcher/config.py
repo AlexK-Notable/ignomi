@@ -43,5 +43,10 @@ bookmarks_window = bookmarks_panel.create_window()
 search_window = search_panel.create_window()
 frequent_window = frequent_panel.create_window()
 
+# Store panel references on windows for cross-panel communication
+bookmarks_window.panel = bookmarks_panel
+search_window.panel = search_panel
+frequent_window.panel = frequent_panel
+
 print("Ignomi launcher initialized successfully")
 print("Press Mod+Space to open launcher")

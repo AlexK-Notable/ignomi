@@ -15,7 +15,7 @@ from gi.repository import Gtk, Gdk, GObject
 import sys
 sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
 
-from utils.helpers import load_bookmarks, save_bookmarks, launch_app, remove_bookmark, get_focused_monitor
+from utils.helpers import load_bookmarks, save_bookmarks, launch_app, remove_bookmark, get_monitor_under_cursor
 from services.frecency import get_frecency_service
 
 
@@ -80,7 +80,7 @@ class BookmarksPanel:
 
         window = widgets.Window(
             namespace="ignomi-bookmarks",
-            monitor=get_focused_monitor(),
+            monitor=get_monitor_under_cursor(),
             anchor=["left", "top", "bottom"],
             exclusivity="exclusive",
             kb_mode="on_demand",  # Allow mouse interaction
@@ -273,10 +273,27 @@ class BookmarksPanel:
         """Remove visual feedback when drag leaves."""
         button.remove_css_class("drag-hover")
 
+    def refresh_from_disk(self):
+        """Reload bookmarks from disk and refresh UI (can be called externally)."""
+        from utils.helpers import load_bookmarks
+
+        # Reload bookmarks from disk
+        bookmark_ids = load_bookmarks()
+
+        # Convert IDs to app objects
+        self.bookmarks = []
+        for app_id in bookmark_ids:
+            app = self._find_app_by_id(app_id)
+            if app:
+                self.bookmarks.append(app)
+
+        # Refresh the UI
+        self._refresh_app_list()
+
     def _on_visibility_changed(self, window, param):
         """Update monitor placement when window becomes visible."""
         if window.get_visible():
-            # Window is being shown - update to current focused monitor
-            focused = get_focused_monitor()
-            if window.monitor != focused:
-                window.monitor = focused
+            # Window is being shown - update to monitor under cursor
+            cursor_monitor = get_monitor_under_cursor()
+            if window.monitor != cursor_monitor:
+                window.monitor = cursor_monitor
