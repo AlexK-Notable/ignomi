@@ -15,7 +15,9 @@ from ignis import widgets
 from ignis.services.applications import ApplicationsService
 from gi.repository import Gtk, GLib, Gdk
 import sys
-sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
+import os
+# Add launcher directory to path dynamically (works from any location/worktree)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.helpers import launch_app, add_bookmark, is_bookmarked, get_monitor_under_cursor
 from services.frecency import get_frecency_service
@@ -58,6 +60,14 @@ class SearchPanel:
         )
         # Center the text in the entry
         self.search_entry.set_alignment(0.5)
+
+        # Handle Enter key via Entry's activate signal
+        self.search_entry.connect("activate", lambda entry: self._on_entry_activate())
+
+        # Add key event handler to search entry for navigation (arrow keys, Escape)
+        entry_key_controller = Gtk.EventControllerKey()
+        entry_key_controller.connect("key-pressed", self._on_key_press)
+        self.search_entry.add_controller(entry_key_controller)
 
         # Results container
         self.results_box = widgets.Box(
@@ -139,6 +149,12 @@ class SearchPanel:
             button = self._create_result_button(app)
             self.results_box.append(button)
             self.result_buttons.append(button)
+
+        # Auto-select first result if results exist
+        if self.result_buttons:
+            self.selected_index = 0
+        else:
+            self.selected_index = -1
 
         # Apply selection highlight if index is valid
         self._update_selection_highlight()
@@ -248,6 +264,11 @@ class SearchPanel:
             if window.monitor != cursor_monitor:
                 window.monitor = cursor_monitor
 
+            # Auto-select first result when opening
+            if self.result_buttons:
+                self.selected_index = 0
+                self._update_selection_highlight()
+
             # Grab focus with delay to allow animation to complete
             # Window animates into position, so we need to wait for it to settle
             # before calculating and moving cursor to search entry
@@ -317,8 +338,14 @@ class SearchPanel:
 
         return False  # Don't repeat
 
+    def _on_entry_activate(self):
+        """Handle Enter key press in search entry - launch selected app."""
+        if 0 <= self.selected_index < len(self.filtered_apps):
+            app = self.filtered_apps[self.selected_index]
+            self._on_app_click(app)
+
     def _on_key_press(self, controller, keyval, keycode, state):
-        """Handle keyboard events - arrows for navigation, Enter to launch, Escape to close."""
+        """Handle keyboard events - arrows for navigation, Escape to close."""
         from utils.helpers import close_launcher
 
         # Escape - close launcher
@@ -351,12 +378,7 @@ class SearchPanel:
                 self.search_entry.grab_focus()
             return True
 
-        # Enter - launch selected app
-        elif keyval == Gdk.KEY_Return:
-            if 0 <= self.selected_index < len(self.filtered_apps):
-                app = self.filtered_apps[self.selected_index]
-                self._on_app_click(app)
-                return True
+        # Note: Enter key is handled by Entry's activate signal (see _on_entry_activate)
 
         return False
 

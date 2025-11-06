@@ -12,7 +12,7 @@ from ignis.app import IgnisApp
 import sys
 
 # Add launcher to path
-sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
+sys.path.insert(0, '/home/komi/repos/ignomi/.worktrees/auto-select/launcher')
 
 from panels.bookmarks import BookmarksPanel
 from panels.search import SearchPanel
