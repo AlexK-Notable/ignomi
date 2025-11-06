@@ -35,6 +35,9 @@ env/
 *~
 .DS_Store
 
+# Git worktrees
+.worktrees/
+
 # Ignis
 .ignis/
 
