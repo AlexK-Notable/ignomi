@@ -10,9 +10,12 @@ Usage:
 
 from ignis.app import IgnisApp
 import sys
+import os
 
-# Add launcher to path
-sys.path.insert(0, '/home/komi/repos/ignomi/.worktrees/auto-select/launcher')
+# Add launcher to path dynamically (works from any location/worktree)
+# Get the directory containing this config.py file
+config_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, config_dir)
 
 from panels.bookmarks import BookmarksPanel
 from panels.search import SearchPanel

@@ -64,10 +64,8 @@ class SearchPanel:
         # Handle Enter key via Entry's activate signal
         self.search_entry.connect("activate", lambda entry: self._on_entry_activate())
 
-        # Add key event handler to search entry for navigation (arrow keys, Escape)
-        entry_key_controller = Gtk.EventControllerKey()
-        entry_key_controller.connect("key-pressed", self._on_key_press)
-        self.search_entry.add_controller(entry_key_controller)
+        # Keyboard navigation is handled by window-level controller in CAPTURE phase
+        # (see window creation below - captures arrows before GTK's default focus switching)
 
         # Results container
         self.results_box = widgets.Box(
@@ -104,10 +102,16 @@ class SearchPanel:
             )
         )
 
-        # Add keyboard event controller
+        # Add keyboard event controller in CAPTURE phase to intercept arrow keys
+        # BEFORE GTK's default key bindings move focus away from search entry
         key_controller = Gtk.EventControllerKey()
+        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect("key-pressed", self._on_key_press)
         window.add_controller(key_controller)
+
+        # DEBUG: Verify controller was added
+        with open("/tmp/ignomi-debug.log", "a") as f:
+            f.write(f"[INIT] EventControllerKey added to window, phase: {key_controller.get_propagation_phase()}\n")
 
         # Add signal handler to update monitor and handle focus when window becomes visible
         window.connect("notify::visible", self._on_visibility_changed)
@@ -170,6 +174,7 @@ class SearchPanel:
             widgets.Button with icon and label
         """
         button = widgets.Button(
+            can_focus=False,  # Buttons don't need focus - selection is CSS-only
             css_classes=["app-item", "result-item"],
             child=widgets.Box(
                 halign="center",  # Center entire entry
@@ -345,13 +350,28 @@ class SearchPanel:
             self._on_app_click(app)
 
     def _on_key_press(self, controller, keyval, keycode, state):
-        """Handle keyboard events - arrows for navigation, Escape to close."""
+        """Handle keyboard events in CAPTURE phase - arrows, Enter, Escape."""
         from utils.helpers import close_launcher
+
+        # DEBUG: Log which widget has focus
+        from gi.repository import Gtk
+        window = self.search_entry.get_root()
+        focused = window.get_focus()
+        with open("/tmp/ignomi-debug.log", "a") as f:
+            f.write(f"[DEBUG] Key pressed: {Gdk.keyval_name(keyval)}, Focus on: {focused}\n")
 
         # Escape - close launcher
         if keyval == Gdk.KEY_Escape:
             close_launcher()
             return True
+
+        # Enter - launch selected app (handled here because Entry's activate signal
+        # only fires when Entry has focus, but we keep focus on Entry while navigating)
+        if keyval == Gdk.KEY_Return or keyval == Gdk.KEY_KP_Enter:
+            if 0 <= self.selected_index < len(self.filtered_apps):
+                app = self.filtered_apps[self.selected_index]
+                self._on_app_click(app)
+                return True
 
         # No results - no navigation
         if not self.result_buttons:
@@ -359,10 +379,17 @@ class SearchPanel:
 
         # Down arrow - move selection down
         if keyval == Gdk.KEY_Down:
+            with open("/tmp/ignomi-debug.log", "a") as f:
+                f.write(f"[DEBUG] Down arrow - BEFORE: selected_index={self.selected_index}, Entry has focus: {focused == self.search_entry}\n")
             if self.selected_index < len(self.result_buttons) - 1:
                 self.selected_index += 1
                 self._update_selection_highlight()
                 self._scroll_to_selected()
+            # Force focus back to entry
+            self.search_entry.grab_focus()
+            focused_after = window.get_focus()
+            with open("/tmp/ignomi-debug.log", "a") as f:
+                f.write(f"[DEBUG] Down arrow - AFTER grab_focus: Entry has focus: {focused_after == self.search_entry}\n")
             return True
 
         # Up arrow - move selection up
@@ -372,13 +399,11 @@ class SearchPanel:
                 self._update_selection_highlight()
                 self._scroll_to_selected()
             elif self.selected_index == 0:
-                # At top - return focus to search entry
-                self.selected_index = -1
-                self._update_selection_highlight()
-                self.search_entry.grab_focus()
+                # At top - could move to -1 (no selection) but keeping at 0 is fine
+                pass
+            # Force focus back to entry
+            self.search_entry.grab_focus()
             return True
-
-        # Note: Enter key is handled by Entry's activate signal (see _on_entry_activate)
 
         return False
 
@@ -397,4 +422,6 @@ class SearchPanel:
             # Request scroll to the button
             # Note: GTK4 doesn't have a direct "scroll to widget" method
             # The button will be visible if results box is properly configured
-            selected_button.grab_focus()
+            # REMOVED: selected_button.grab_focus()
+            # Focus must stay on search entry for Enter key and typing to work.
+            # Visual selection is handled by CSS class "keyboard-selected".
