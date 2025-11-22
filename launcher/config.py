@@ -13,8 +13,8 @@ import sys
 import os
 
 # Add launcher to path dynamically (works from any location/worktree)
-# Get the directory containing this config.py file
-config_dir = os.path.dirname(os.path.abspath(__file__))
+# Resolve symlink to get the actual launcher directory
+config_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, config_dir)
 
 from panels.bookmarks import BookmarksPanel
@@ -24,15 +24,16 @@ from panels.frequent import FrequentPanel
 # Get Ignis app instance
 app = IgnisApp.get_default()
 
-# Load CSS styling
+# Load CSS styling dynamically from current location
 # Note: colors.css should be symlinked from Wallust output
+styles_dir = os.path.join(config_dir, "styles")
 try:
-    app.apply_css("/home/komi/repos/ignomi/launcher/styles/colors.css")
+    app.apply_css(os.path.join(styles_dir, "colors.css"))
 except Exception as e:
     print(f"Warning: Could not load colors.css: {e}")
 
 try:
-    app.apply_css("/home/komi/repos/ignomi/launcher/styles/main.css")
+    app.apply_css(os.path.join(styles_dir, "main.css"))
 except Exception as e:
     print(f"Warning: Could not load main.css: {e}")
 
