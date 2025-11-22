@@ -109,10 +109,6 @@ class SearchPanel:
         key_controller.connect("key-pressed", self._on_key_press)
         window.add_controller(key_controller)
 
-        # DEBUG: Verify controller was added
-        with open("/tmp/ignomi-debug.log", "a") as f:
-            f.write(f"[INIT] EventControllerKey added to window, phase: {key_controller.get_propagation_phase()}\n")
-
         # Add signal handler to update monitor and handle focus when window becomes visible
         window.connect("notify::visible", self._on_visibility_changed)
 
@@ -353,13 +349,6 @@ class SearchPanel:
         """Handle keyboard events in CAPTURE phase - arrows, Enter, Escape."""
         from utils.helpers import close_launcher
 
-        # DEBUG: Log which widget has focus
-        from gi.repository import Gtk
-        window = self.search_entry.get_root()
-        focused = window.get_focus()
-        with open("/tmp/ignomi-debug.log", "a") as f:
-            f.write(f"[DEBUG] Key pressed: {Gdk.keyval_name(keyval)}, Focus on: {focused}\n")
-
         # Escape - close launcher
         if keyval == Gdk.KEY_Escape:
             close_launcher()
@@ -379,17 +368,12 @@ class SearchPanel:
 
         # Down arrow - move selection down
         if keyval == Gdk.KEY_Down:
-            with open("/tmp/ignomi-debug.log", "a") as f:
-                f.write(f"[DEBUG] Down arrow - BEFORE: selected_index={self.selected_index}, Entry has focus: {focused == self.search_entry}\n")
             if self.selected_index < len(self.result_buttons) - 1:
                 self.selected_index += 1
                 self._update_selection_highlight()
                 self._scroll_to_selected()
             # Force focus back to entry
             self.search_entry.grab_focus()
-            focused_after = window.get_focus()
-            with open("/tmp/ignomi-debug.log", "a") as f:
-                f.write(f"[DEBUG] Down arrow - AFTER grab_focus: Entry has focus: {focused_after == self.search_entry}\n")
             return True
 
         # Up arrow - move selection up
