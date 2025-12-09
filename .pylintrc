@@ -1,0 +1,30 @@
+[MASTER]
+# Ignore import errors for modules that aren't available in CI
+# (ignis, gi.repository, etc. require GTK4 and system libraries)
+ignored-modules=ignis,gi,gi.repository,toml
+
+[MESSAGES CONTROL]
+# Disable import-error since ignis/GTK aren't installable in CI
+# Disable no-name-in-module for the same reason
+# Disable wrong-import-position - we need dynamic path setup before imports
+# Disable wrong-import-order - mixed first/third party due to dynamic paths
+disable=import-error,
+        no-name-in-module,
+        wrong-import-position,
+        wrong-import-order,
+        too-few-public-methods,
+        too-many-instance-attributes,
+        too-many-locals,
+        too-many-nested-blocks,
+        import-outside-toplevel,
+        broad-exception-caught,
+        global-statement
+
+[FORMAT]
+# Allow slightly longer lines for readability
+max-line-length=120
+
+[DESIGN]
+# These are UI classes, they legitimately have many attributes
+max-attributes=15
+max-locals=20
