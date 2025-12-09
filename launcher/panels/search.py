@@ -79,6 +79,7 @@ class SearchPanel:
 
         window = widgets.Window(
             namespace="ignomi-search",
+            css_classes=["ignomi-window"],
             monitor=get_monitor_under_cursor(),
             anchor=["top"],
             exclusivity="normal",
@@ -86,6 +87,8 @@ class SearchPanel:
             layer="top",
             default_width=600,
             default_height=700,
+            visible=False,  # Start hidden, show via hotkey
+            margin_top=8,  # Layer Shell margin (outside window, no background bleed)
             child=widgets.Box(
                 vertical=True,
                 css_classes=["panel", "search-panel"],

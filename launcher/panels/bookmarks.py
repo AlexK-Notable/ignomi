@@ -80,12 +80,17 @@ class BookmarksPanel:
 
         window = widgets.Window(
             namespace="ignomi-bookmarks",
+            css_classes=["ignomi-window"],
             monitor=get_monitor_under_cursor(),
             anchor=["left", "top", "bottom"],
             exclusivity="exclusive",
             kb_mode="on_demand",  # Allow mouse interaction
             layer="top",
             default_width=320,
+            visible=False,  # Start hidden, show via hotkey
+            margin_top=8,  # Layer Shell margins (outside window, no background bleed)
+            margin_bottom=8,
+            margin_left=8,
             child=widgets.Box(
                 vertical=True,
                 css_classes=["panel", "bookmarks-panel"],

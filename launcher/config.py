@@ -26,14 +26,15 @@ app = IgnisApp.get_default()
 
 # Load CSS styling dynamically from current location
 # Note: colors.css should be symlinked from Wallust output
+# Use "user" priority (800) to override global GTK4 CSS (~/.config/gtk-4.0/gtk.css)
 styles_dir = os.path.join(config_dir, "styles")
 try:
-    app.apply_css(os.path.join(styles_dir, "colors.css"))
+    app.apply_css(os.path.join(styles_dir, "colors.css"), style_priority="user")
 except Exception as e:
     print(f"Warning: Could not load colors.css: {e}")
 
 try:
-    app.apply_css(os.path.join(styles_dir, "main.css"))
+    app.apply_css(os.path.join(styles_dir, "main.css"), style_priority="user")
 except Exception as e:
     print(f"Warning: Could not load main.css: {e}")
 

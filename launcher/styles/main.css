@@ -1,19 +1,25 @@
 /* Ignomi Launcher - Main Stylesheet */
 
 /* Window must be transparent for RGBA backgrounds to work */
-window {
+/* GTK4 applies .background class to GtkWindow instances */
+/* Target all possible selectors for maximum specificity */
+window,
+window.background,
+window.ignomi-window,
+window.ignomi-window.background,
+.background {
     background: transparent;
+    background-color: transparent;
 }
 
 /* Panel containers */
 .panel {
-    background-color: @bg_75;
+    background-color: @bg_50;
     color: @fg;
     border-radius: 12px;
-    border: 1px solid @accent_30;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    border: none;
+    box-shadow: none;
     padding: 16px;
-    margin: 8px;
 }
 
 .panel-header {
