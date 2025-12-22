@@ -1,43 +1,60 @@
-# Ignomi - Three-Panel Application Launcher
+# Ignomi
+
+**Finally, a launcher where you can actually click all the panels.**
+
+You wanted a multi-panel launcher. Bookmarks on the left, search in the middle, frecent apps on the right. Simple, right? Except Rofi grabs the pointer globally, so the moment your search panel opens, your side panels become furniture. Click all you want—nothing happens.
+
+Ignomi fixes this. Built on Ignis, all three panels run in one process with proper Wayland Layer Shell support. No pointer grab conflicts. Click anywhere. It just works.
+
+## Why This Exists
+
+| Problem | How We Solve It |
+|---------|-----------------|
+| "Rofi grabs the pointer, side panels are dead" | **Single process** - Ignis handles all panels, no grab conflicts |
+| "I keep launching the same 5 apps" | **Smart frecency** - Firefox-style algorithm learns your patterns |
+| "I want quick access to favorites" | **Bookmarks panel** - Right-click to add, drag to reorder |
+| "My launcher looks wrong after wallpaper change" | **Wallust integration** - Colors update automatically |
+| "Launchers are slow to open" | **Sub-100ms launch** - Python + GTK4, minimal footprint |
+
+## What Makes It Different
+
+- **Actually multi-panel**: Three independent panels that all respond to clicks
+- **Learns your habits**: Frecency ranking means your most-used apps float to the top
+- **Keyboard and mouse**: Full keyboard nav in search, click-friendly everywhere
+- **Wayland-native**: Built for Hyprland/Sway/Niri, not ported from X11
+
+---
 
 ![Status](https://img.shields.io/badge/status-in%20development-yellow)
 ![Platform](https://img.shields.io/badge/platform-Wayland-blue)
 ![Framework](https://img.shields.io/badge/framework-Ignis-purple)
 
-A three-panel application launcher built with [Ignis](https://github.com/linkfrg/ignis) for Wayland compositors (Hyprland, Sway, Niri).
-
 ## Features
 
-- 🎯 **Three Interactive Panels**
+- **Three Interactive Panels**
   - Left: Bookmarked apps (customizable favorites)
   - Center: Search panel (filter all installed apps)
   - Right: Frequent apps (auto-ranked by usage)
 
-- 📌 **Dynamic Bookmarks**
+- **Dynamic Bookmarks**
   - Right-click to add/remove apps
   - Drag-and-drop to reorder
   - Persists across sessions
 
-- 🧠 **Smart Frecency**
+- **Smart Frecency**
   - Firefox-style algorithm (frequency × recency)
   - Learns your usage patterns over time
   - Time-weighted rankings (recent apps rank higher)
 
-- 🎨 **Wallust Integration**
+- **Wallust Integration**
   - Colors automatically match your wallpaper
   - Dynamic theme updates when wallpaper changes
   - GTK4 CSS styling
 
-- ⚡ **Fast & Lightweight**
+- **Fast & Lightweight**
   - Python + GTK4 + Wayland Layer Shell
   - Sub-100ms launch time
   - Minimal memory footprint
-
-## Why Ignomi?
-
-**Problem:** The previous launcher used GTK4 panels + Rofi, but Rofi's global pointer grab made the side panels unclickable.
-
-**Solution:** Ignis provides all three panels under one process, eliminating pointer grab conflicts and enabling true multi-panel interaction.
 
 ## Installation
 
@@ -105,7 +122,6 @@ bindd = $mainMod, SPACE, Launch Ignomi three-panel launcher, exec, ignis open-wi
 Track apps launched outside the launcher:
 
 ```bash
-# Track a specific app
 ~/repos/ignomi/scripts/track-launch.sh firefox.desktop
 ```
 
@@ -209,10 +225,6 @@ ignis reload
 journalctl -f | grep ignis
 ```
 
-### Testing Checklist
-
-See `project-docs/2025-11-02-ignomi-launcher-design.md` for comprehensive testing strategy.
-
 ## Troubleshooting
 
 ### Launcher doesn't appear
@@ -260,23 +272,6 @@ wallust run ~/.config/wallust/wallpapers/current.png
 ls -la ~/repos/ignomi/launcher/styles/colors.css
 ```
 
-## Architecture
-
-Ignomi uses a modular architecture with clear separation of concerns:
-
-- **Panels:** UI windows (bookmarks, search, frequent)
-- **Services:** Backend logic (frecency tracking, app discovery)
-- **Widgets:** Reusable UI components
-- **Utils:** Shared helper functions
-
-All panels communicate through GObject signals for reactive updates.
-
-See `project-docs/2025-11-02-ignomi-launcher-design.md` for detailed architecture documentation.
-
-## Contributing
-
-This is a personal project, but suggestions and bug reports are welcome via GitHub issues.
-
 ## License
 
 [MIT License](LICENSE)
@@ -284,21 +279,5 @@ This is a personal project, but suggestions and bug reports are welcome via GitH
 ## Credits
 
 - [Ignis Framework](https://github.com/linkfrg/ignis) - Widget system and Wayland integration
-- [IgnisNiriShell](https://github.com/lost-melody/IgnisNiriShell) - Inspiration for app launcher
 - [Wallust](https://github.com/devora-garb/wallust) - Dynamic color generation
 - Firefox Frecency Algorithm - Usage ranking approach
-
-## Related Projects
-
-- [Rofi](https://github.com/davatorium/rofi) - Traditional launcher (incompatible with multi-panel)
-- [Walker](https://github.com/abenz1267/walker) - Alternative Wayland launcher
-- [Exo](https://github.com/debuggyo/Exo) - Full Ignis desktop shell
-
----
-
-**Status:** In Development
-**Version:** 0.1.0-dev
-**Platform:** Linux (Wayland)
-**Compositor Tested:** Hyprland
-
-For detailed design decisions and implementation notes, see `project-docs/`.
