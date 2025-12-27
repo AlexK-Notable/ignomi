@@ -71,7 +71,7 @@ class BookmarksPanel:
         # Create scrollable app list
         self.app_list_box = widgets.Box(
             vertical=True,
-            spacing=4,
+            spacing=3,
             css_classes=["app-list"]
         )
 
@@ -93,20 +93,28 @@ class BookmarksPanel:
             margin_left=8,
             child=widgets.Box(
                 vertical=True,
-                css_classes=["panel", "bookmarks-panel"],
+                vexpand=True,
+                valign="center",
                 child=[
-                    # Header
-                    widgets.Label(
-                        label="Bookmarks",
-                        css_classes=["panel-header"],
-                        halign="start"
-                    ),
-                    # Scrollable app list
-                    widgets.Scroll(
-                        vexpand=True,
-                        hexpand=True,
-                        min_content_width=280,
-                        child=self.app_list_box
+                    # Panel background wraps content
+                    widgets.Box(
+                        vertical=True,
+                        css_classes=["panel", "bookmarks-panel"],
+                        child=[
+                            # Header (horizontally centered)
+                            widgets.Label(
+                                label="Bookmarks",
+                                css_classes=["panel-header"],
+                                halign="center"
+                            ),
+                            # Scrollable app list (grows with content)
+                            widgets.Scroll(
+                                hexpand=True,
+                                min_content_width=280,
+                                propagate_natural_height=True,
+                                child=self.app_list_box
+                            )
+                        ]
                     )
                 ]
             )
@@ -147,33 +155,36 @@ class BookmarksPanel:
             css_classes=["app-item"],
             on_click=lambda x, app=app: self._on_app_click(app),
             child=widgets.Box(
-                spacing=12,
+                spacing=8,
                 child=[
-                    # App icon
+                    # App icon on the left
                     widgets.Icon(
                         image=app.icon,
                         pixel_size=48,
                         css_classes=["app-icon"]
                     ),
-                    # App name and description
+                    # App name and description (left-aligned, no truncation)
                     widgets.Box(
                         vertical=True,
                         vexpand=True,
+                        hexpand=True,
                         valign="center",
                         child=[
                             widgets.Label(
                                 label=app.name,
                                 css_classes=["app-name"],
                                 halign="start",
-                                ellipsize="end",
-                                max_width_chars=20
+                                wrap=True,
+                                xalign=0.0
                             ),
                             widgets.Label(
                                 label=app.description or "",
                                 css_classes=["app-description"],
                                 halign="start",
-                                ellipsize="end",
-                                max_width_chars=25
+                                wrap=True,
+                                wrap_mode="word_char",
+                                lines=2,
+                                xalign=0.0
                             )
                         ]
                     )

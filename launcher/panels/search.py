@@ -81,25 +81,34 @@ class SearchPanel:
             namespace="ignomi-search",
             css_classes=["ignomi-window"],
             monitor=get_monitor_under_cursor(),
-            anchor=["top"],
+            anchor=["top", "bottom"],
             exclusivity="normal",
             kb_mode="on_demand",  # Allow interaction while focused
             layer="top",
             default_width=600,
-            default_height=700,
             visible=False,  # Start hidden, show via hotkey
             margin_top=8,  # Layer Shell margin (outside window, no background bleed)
+            margin_bottom=8,
             child=widgets.Box(
                 vertical=True,
-                css_classes=["panel", "search-panel"],
+                vexpand=True,
+                valign="center",
                 child=[
-                    # Search entry
-                    self.search_entry,
-                    # Scrollable results
-                    widgets.Scroll(
-                        vexpand=True,
-                        hexpand=True,
-                        child=self.results_box
+                    # Panel background wraps content
+                    widgets.Box(
+                        vertical=True,
+                        css_classes=["panel", "search-panel"],
+                        child=[
+                            # Search entry
+                            self.search_entry,
+                            # Scrollable results (grows with content)
+                            widgets.Scroll(
+                                hexpand=True,
+                                max_content_height=500,
+                                propagate_natural_height=True,
+                                child=self.results_box
+                            )
+                        ]
                     )
                 ]
             )

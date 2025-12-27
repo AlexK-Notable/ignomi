@@ -14,7 +14,7 @@ window.ignomi-window.background,
 
 /* Panel containers */
 .panel {
-    background-color: @bg_50;
+    background-color: @bg_65;
     color: @fg;
     border-radius: 12px;
     border: none;
@@ -28,6 +28,7 @@ window.ignomi-window.background,
     margin-bottom: 12px;
     padding: 8px 0;
 }
+
 
 /* App list containers */
 .app-list {

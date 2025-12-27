@@ -80,7 +80,7 @@ class FrequentPanel:
         # Create app list container
         self.app_list_box = widgets.Box(
             vertical=True,
-            spacing=4,
+            spacing=3,
             css_classes=["app-list"]
         )
 
@@ -102,20 +102,28 @@ class FrequentPanel:
             margin_right=8,
             child=widgets.Box(
                 vertical=True,
-                css_classes=["panel", "frequent-panel"],
+                vexpand=True,
+                valign="center",
                 child=[
-                    # Header
-                    widgets.Label(
-                        label="Frequent",
-                        css_classes=["panel-header"],
-                        halign="start"
-                    ),
-                    # Scrollable app list
-                    widgets.Scroll(
-                        vexpand=True,
-                        hexpand=True,
-                        min_content_width=280,
-                        child=self.app_list_box
+                    # Panel background wraps content
+                    widgets.Box(
+                        vertical=True,
+                        css_classes=["panel", "frequent-panel"],
+                        child=[
+                            # Header (horizontally centered)
+                            widgets.Label(
+                                label="Frequent",
+                                css_classes=["panel-header"],
+                                halign="center"
+                            ),
+                            # Scrollable app list (grows with content)
+                            widgets.Scroll(
+                                hexpand=True,
+                                min_content_width=280,
+                                propagate_natural_height=True,
+                                child=self.app_list_box
+                            )
+                        ]
                     )
                 ]
             )
@@ -169,38 +177,49 @@ class FrequentPanel:
             css_classes=["app-item"],
             on_click=lambda x, app=app: self._on_app_click(app),
             child=widgets.Box(
-                spacing=12,
+                spacing=8,
                 child=[
-                    # App icon
-                    widgets.Icon(
-                        image=app.icon,
-                        pixel_size=48,
-                        css_classes=["app-icon"]
-                    ),
-                    # App name, description, and count
+                    # App name and description (right-aligned, no truncation)
                     widgets.Box(
                         vertical=True,
                         vexpand=True,
+                        hexpand=True,
                         valign="center",
                         child=[
                             widgets.Label(
                                 label=app.name,
                                 css_classes=["app-name"],
-                                halign="start",
-                                ellipsize="end",
-                                max_width_chars=20
+                                halign="end",
+                                wrap=True,
+                                xalign=1.0
                             ),
                             widgets.Label(
                                 label=app.description or "",
                                 css_classes=["app-description"],
-                                halign="start",
-                                ellipsize="end",
-                                max_width_chars=25
+                                halign="end",
+                                wrap=True,
+                                wrap_mode="word_char",
+                                lines=2,
+                                xalign=1.0
+                            )
+                        ]
+                    ),
+                    # Icon with launch count below
+                    widgets.Box(
+                        vertical=True,
+                        valign="center",
+                        halign="end",
+                        spacing=4,
+                        child=[
+                            widgets.Icon(
+                                image=app.icon,
+                                pixel_size=48,
+                                css_classes=["app-icon"]
                             ),
                             widgets.Label(
-                                label=f"Launched {launch_count}× ",
+                                label=f"{launch_count}×",
                                 css_classes=["frecency-count"],
-                                halign="start"
+                                halign="center"
                             )
                         ]
                     )
@@ -233,6 +252,13 @@ class FrequentPanel:
             GLib.timeout_add(300, lambda: button.remove_css_class("bookmark-added"))
 
             print(f"Added {app.name} to bookmarks")
+
+            # Refresh bookmarks panel to show new item
+            from ignis.app import IgnisApp
+            app_instance = IgnisApp.get_default()
+            bookmarks_window = app_instance.get_window("ignomi-bookmarks")
+            if bookmarks_window and hasattr(bookmarks_window, 'panel'):
+                bookmarks_window.panel.refresh_from_disk()
 
     def _on_visibility_changed(self, window, param):
         """Update monitor placement when window becomes visible."""
