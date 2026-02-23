@@ -2,10 +2,13 @@
 Ignomi Launcher - Main Ignis Configuration
 
 This file is the entry point for Ignis. It creates all three panels
-and coordinates their display.
+(bookmarks, search, frequent) and coordinates their display.
 
 Usage:
-  ignis open-window ignomi
+  scripts/toggle-launcher.sh          # Toggle all three panels
+  ignis open-window ignomi-bookmarks  # Open bookmarks panel only
+  ignis open-window ignomi-search     # Open search panel only
+  ignis open-window ignomi-frequent   # Open frequent panel only
 """
 
 from ignis.app import IgnisApp

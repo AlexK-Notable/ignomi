@@ -1,5 +1,24 @@
 /* Ignomi Launcher - Main Stylesheet */
 
+/*
+ * Color Variable Naming Convention
+ * ---------------------------------
+ * Variables from colors.css follow the pattern: @base_opacitypercent
+ *
+ *   @bg_65      = background color at 65% opacity
+ *   @fg_70      = foreground color at 70% opacity
+ *   @color4_30  = palette color 4 at 30% opacity
+ *   @color6_40  = palette color 6 at 40% opacity
+ *   @accent     = accent color (opaque, mapped from palette)
+ *   @success_50 = success color at 50% opacity
+ *
+ * GTK4 cannot apply alpha() to @define-color variables at runtime,
+ * so all opacity variants must be pre-computed as separate RGBA
+ * @define-color declarations in the Wallust template.
+ *
+ * See: launcher/README.md > Configuration > styles/colors.css
+ */
+
 /* Window must be transparent for RGBA backgrounds to work */
 /* GTK4 applies .background class to GtkWindow instances */
 /* Target all possible selectors for maximum specificity */

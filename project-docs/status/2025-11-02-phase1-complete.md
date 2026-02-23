@@ -17,17 +17,16 @@ Phase 1 theming successfully implemented transparent panels with compositor blur
 - ✓ Organized project-docs into architecture/research/discoveries/status
 
 ### 2. Transparency & Blur
-- ✓ Reduced panel opacity from 95% to 75%
+- ✓ Reduced panel opacity from 95% to 65% (`@bg_65` in main.css)
 - ✓ Added window-level transparency (critical breakthrough)
 - ✓ Configured Hyprland layerrules for compositor blur
 - ✓ Verified blur working on all three monitors
 
 ### 3. Visual Styling
-- ✓ Added subtle accent-colored borders (1px @accent_30)
-- ✓ Added depth with box-shadow (0 4px 12px rgba(0,0,0,0.4))
-- ✓ Improved hover states using Wallust color palette
-- ✓ Enhanced search entry with focus glow effects
-- ✓ Refined scrollbar theming with dynamic colors
+- ✓ Tested accent-colored borders and box-shadow (later removed for cleaner aesthetic -- current main.css uses `border: none; box-shadow: none`)
+- ✓ Improved hover states using Wallust color palette (`@color4_30` hover, `@color6_50` active)
+- ✓ Enhanced search entry with focus glow effects (`@color6_30` shadow, `@bg_80` focus background)
+- ✓ Refined scrollbar theming with dynamic colors (`@color4_40` / `@color6_60`)
 
 ### 4. Wallust Integration
 - ✓ Expanded color palette usage (@color0-8)
@@ -106,7 +105,7 @@ window {
 ## Visual Results
 
 ### Current Aesthetic
-- **Panels**: 75% opacity dark backgrounds (#212225) with blur
+- **Panels**: 65% opacity dark backgrounds (`@bg_65`, currently #292420) with blur
 - **Text**: Light foreground (#D6E1EC) for readability
 - **Accent**: Orange (#B17344) from autumn foliage in wallpaper
 - **Borders**: Subtle accent-colored outlines (30% opacity)
@@ -142,7 +141,7 @@ Applied systematic debugging methodology:
 - Basic functional launcher only
 
 ### After Phase 1
-- ✓ Transparent panels (75% opacity)
+- ✓ Transparent panels (65% opacity)
 - ✓ Compositor blur visible through panels
 - ✓ Dynamic colors from wallpaper
 - ✓ Professional aesthetic matching desktop theme

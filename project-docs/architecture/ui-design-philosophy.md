@@ -1,7 +1,7 @@
 # Ignomi Launcher - UI Design Philosophy
 
-**Last Updated:** 2025-11-02
-**Status:** Phase 1 - Basic Transparency + Blur (In Progress)
+**Last Updated:** 2026-02-23
+**Status:** Phase 1 Complete (2025-11-02). Phase 2+ not yet started.
 
 ## Design Vision
 
@@ -39,7 +39,7 @@ Create a modern, translucent launcher that seamlessly integrates with the Wallus
 - **Panel containers** (`.panel`) - main container for each panel
 - **Panel headers** (`.panel-header`) - "Bookmarks" / "Frequent" titles
 - **App items** (`.app-item`) - clickable app buttons
-- **App icons** (`.app-icon`) - 32px (search) / 48px (side panels)
+- **App icons** (`.app-icon`) - 24px (search results) / 48px (bookmarks + frequent panels)
 - **App text**:
   - `.app-name` - primary app name (14px, bold)
   - `.app-description` - secondary description (11px)
@@ -72,11 +72,13 @@ Wallust generates `@color0` through `@color15` for expanded theming:
 - `@color7-8` - Light tones (good for hover states)
 - `@color9-15` - Vibrant variants
 
-**Usage Plan:**
-- Hover states: `@color4` or `@color5`
-- Active states: `@color6`
-- Subtle backgrounds: `alpha(@color1, 0.3)`
-- Borders: `alpha(@color4, 0.5)`
+**Implemented Usage (pre-computed alpha variants in Wallust template):**
+- Hover states: `@color4_30` (30% opacity color4)
+- Active states: `@color6_50` (50% opacity color6)
+- Keyboard selection: `@color6_40` with `@color6` left border
+- Search focus glow: `@color6_30`
+- Borders: `@color4_40` (search entry), `@accent` (drag indicator)
+- Scrollbar: `@color4_40` default, `@color6_60` hover
 
 ---
 
@@ -96,12 +98,13 @@ From `~/.config/waybar/style.css`:
 }
 ```
 
-### Target Aesthetic
+### Implemented Aesthetic
 
-**Transparency Levels:**
-- Panel containers: **70-80%** opacity (more transparent than Waybar for launcher context)
-- Search entry: **60%** background, **80%** on focus
-- App items: **Transparent** background, **25%** accent on hover
+**Transparency Levels (actual, using pre-computed Wallust alpha variants):**
+- Panel containers (`.panel`): **65% opacity** (`@bg_65`) -- more transparent than Waybar
+- Search entry (`.search-entry`): **60%** background (`@bg_60`), **80%** on focus (`@bg_80`)
+- App items: **Transparent** background, **30%** color4 on hover (`@color4_30`)
+- Active state: **50%** color6 (`@color6_50`)
 - Headers: **Inherit** from panel
 
 **Blur Settings:**
@@ -191,14 +194,18 @@ From Waybar: `"JetBrains Mono", "Fira Sans Semibold", "Font Awesome 6 Free"`
 
 **Concept:** Solid color at top fading to transparent at bottom
 
+> Note: Would require additional pre-computed alpha variants in the Wallust
+> template since `alpha(@bg, N)` does not work at runtime in GTK4.
+
 ```css
+/* Would need @bg_85, @bg_70, @bg_40, @bg_10 pre-computed in colors.css */
 .panel {
     background: linear-gradient(
         to bottom,
-        alpha(@bg, 0.85) 0%,
-        alpha(@bg, 0.70) 40%,
-        alpha(@bg, 0.40) 70%,
-        alpha(@bg, 0.10) 100%
+        @bg_85 0%,
+        @bg_70 40%,
+        @bg_40 70%,
+        @bg_10 100%
     );
 }
 ```
@@ -219,21 +226,20 @@ From Waybar: `"JetBrains Mono", "Fira Sans Semibold", "Font Awesome 6 Free"`
 
 ## Implementation Phases
 
-### Phase 1: Basic Transparency + Blur ⭐ **START HERE**
+### Phase 1: Basic Transparency + Blur -- COMPLETE (2025-11-02, commit 2968990)
 
-**Goal:** Get blur working and improve transparency to match system aesthetic
+**Implemented:**
+1. Hyprland layerrules configured for blur and per-panel slide animations
+2. Panel opacity set to 65% (`@bg_65`) -- lower than originally planned 75%
+3. Borders removed in favor of clean borderless design (`border: none`)
+4. Shadows removed (`box-shadow: none`) -- the blur provides sufficient depth
+5. Window-level `background: transparent` discovered as critical requirement for GTK4 Layer Shell
+6. Pre-computed 16 alpha variants in Wallust template (GTK4 `alpha(@var)` limitation)
 
-**Tasks:**
-1. Add Hyprland layerrule: `layerrule = blur, ignomi` (in windowrules.conf)
-2. Reduce panel opacity: `alpha(@bg, 0.95)` → `alpha(@bg, 0.75)`
-3. Add panel borders: `border: 1px solid alpha(@accent, 0.3)`
-4. Add panel shadows: `box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4)`
-5. Test on multiple wallpapers for readability
-
-**Success Criteria:**
-- Blur visible behind panels
-- Can see wallpaper through panels but text remains readable
-- Visual consistency with Waybar
+**Divergences from original plan:**
+- Opacity went to 65% (not 75%) for more translucent look
+- Panel borders and shadows were removed after testing -- the minimalist look was preferred
+- CSS uses `@bg_65` pre-computed variables, not `alpha(@bg, 0.65)` (GTK4 limitation)
 
 ### Phase 2: Enhanced Wallust Integration
 
@@ -337,20 +343,21 @@ layerrule = animation slide right, ^(ignomi-frequent)$
 
 ### CSS Color Functions
 
-GTK supports `alpha()` for transparency:
+**Critical GTK4 limitation discovered during Phase 1:**
+
+GTK4's `alpha()` function works with literal hex values but **does NOT work** with `@define-color` variables:
 ```css
-background-color: alpha(@bg, 0.75);  /* 75% opacity */
+/* DOES NOT WORK -- @bg resolves at parse time, alpha() fails */
+background-color: alpha(@bg, 0.75);
+
+/* WORKS -- pre-compute in Wallust template with literal hex */
+@define-color bg_75 alpha(#292420, 0.75);
+background-color: @bg_75;
 ```
 
-For gradients, need to specify RGBA:
-```css
-background: linear-gradient(to bottom,
-    rgba(16, 16, 16, 0.85),  /* @bg at 85% */
-    rgba(16, 16, 16, 0.10)   /* @bg at 10% */
-);
-```
+All alpha variants must be pre-computed in the Wallust template (`~/.config/wallust/templates/ignomi.css`) using literal `{{background}}` / `{{colorN}}` template variables that resolve to hex values before GTK4 parses them.
 
-**Challenge:** Can't directly use Wallust variables in gradients - need to generate them via template.
+See `project-docs/research/gtk4-layer-shell-transparency.md` for full details.
 
 ---
 
@@ -415,8 +422,10 @@ background: linear-gradient(to bottom,
 - Identified all UI components and styling elements
 - Established design principles
 
-### Future Updates
-- Phase 1 completion notes
-- Screenshots before/after
-- User feedback integration
-- Performance measurements
+### 2026-02-23 - Accuracy Update
+- Updated status: Phase 1 marked complete (was "In Progress")
+- Fixed icon sizes: search icons are 24px, not 32px
+- Fixed opacity values: panels use 65% (`@bg_65`), not 75%
+- Fixed CSS examples: replaced `alpha(@var, N)` patterns with pre-computed variables
+- Added GTK4 `alpha()` limitation documentation
+- Updated Phase 1 section with actual implementation details and divergences

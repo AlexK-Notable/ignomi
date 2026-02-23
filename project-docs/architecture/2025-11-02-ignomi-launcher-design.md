@@ -1,7 +1,13 @@
 # Ignomi Launcher - Design Document
 **Date:** 2025-11-02
-**Status:** Implementation In Progress
-**Version:** 1.0
+**Status:** Implemented (all success criteria met)
+**Version:** 2.0
+
+> **Document History:** This document was originally written as a pre-implementation
+> specification on 2025-11-02. Updated 2026-02-23 to match the implemented codebase.
+> All code examples, API signatures, CSS patterns, and known limitations have been
+> verified against the actual source files. Where the original spec diverged from
+> implementation decisions made during development, the document now reflects reality.
 
 ## Executive Summary
 
@@ -21,7 +27,6 @@ Ignomi is a three-panel application launcher built with the Ignis framework (Pyt
 5. **Wallust Integration** - Dynamic colors from current wallpaper
 
 ### Non-Goals (YAGNI)
-- Multi-monitor independent launcher instances
 - Custom desktop entry editing
 - Application categories/folders
 - Thumbnail previews
@@ -106,51 +111,65 @@ Ignomi is a three-panel application launcher built with the Ignis framework (Pyt
 
 ```python
 # Bookmarks Panel (Left)
-Widget.Window(
+widgets.Window(
     namespace="ignomi-bookmarks",
-    monitor=0,
+    monitor=get_monitor_under_cursor(),
     anchor=["left", "top", "bottom"],
-    exclusive=True,  # Reserves screen space
-    keyboard_mode="none",  # No keyboard focus
-    layer="top"
+    exclusivity="exclusive",  # Reserves screen space
+    kb_mode="on_demand",      # Allow mouse interaction
+    layer="top",
+    default_width=320,
+    visible=False,
+    margin_top=8, margin_bottom=8, margin_left=8
 )
 
 # Search Panel (Center)
-Widget.Window(
+widgets.Window(
     namespace="ignomi-search",
-    monitor=0,
-    anchor=["top"],
-    exclusive=False,  # Floating (doesn't reserve space)
-    keyboard_mode="exclusive",  # Gets all keyboard input
-    layer="top"
+    monitor=get_monitor_under_cursor(),
+    anchor=["top", "bottom"],
+    exclusivity="normal",     # Floating (doesn't reserve space)
+    kb_mode="on_demand",      # Allow interaction while focused
+    layer="top",
+    default_width=600,
+    visible=False,
+    margin_top=8, margin_bottom=8
 )
 
 # Frequent Panel (Right)
-Widget.Window(
+widgets.Window(
     namespace="ignomi-frequent",
-    monitor=0,
+    monitor=get_monitor_under_cursor(),
     anchor=["right", "top", "bottom"],
-    exclusive=True,
-    keyboard_mode="none",
-    layer="top"
+    exclusivity="exclusive",
+    kb_mode="on_demand",
+    layer="top",
+    default_width=320,
+    visible=False,
+    margin_top=8, margin_bottom=8, margin_right=8
 )
 ```
 
 **Toggle Behavior:**
-- Hyprland keybind: `Mod+Space → ignis open-window ignomi`
-- All three windows share "ignomi" namespace prefix
-- Ignis shows/hides all matching windows together
-- Search panel automatically receives keyboard focus
+- Hyprland keybind: `Mod+Space` runs `scripts/toggle-launcher.sh`
+- Script issues three parallel `ignis toggle-window` commands (one per panel):
+  ```bash
+  ignis toggle-window ignomi-bookmarks &
+  ignis toggle-window ignomi-search &
+  ignis toggle-window ignomi-frequent &
+  ```
+- Each panel's `notify::visible` signal handler updates monitor placement via `get_monitor_under_cursor()`
+- Search panel moves cursor to search entry after animation completes (300ms delay)
 
 ### Data Flow
 
 **Launch Sequence:**
 1. User clicks app in any panel
-2. `ApplicationsService.launch(app.id)` executes
-3. `FrecencyService.record_launch(app.id)` increments counter
-4. Visual feedback (brief highlight)
-5. GLib.timeout_add(300ms) schedules auto-close
-6. Launcher closes after delay
+2. `launch_app(app, frecency_service, close_delay_ms)` in helpers.py orchestrates:
+   a. `app.launch()` executes the application
+   b. `frecency_service.record_launch(app.id)` increments counter
+   c. `GLib.timeout_add(close_delay_ms, ...)` schedules auto-close
+3. After delay, `close_launcher()` hides all `ignomi-*` windows
 
 **Search Sequence:**
 1. User types in search Entry widget
@@ -175,7 +194,9 @@ Widget.Window(
 
 **Interface:**
 ```python
-class FrecencyService(Service):
+class FrecencyService(BaseService):  # ignis.base_service.BaseService
+    __gtype_name__ = "FrecencyService"
+
     # Signals
     __gsignals__ = {
         "changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
@@ -183,8 +204,14 @@ class FrecencyService(Service):
 
     # Methods
     def record_launch(self, app_id: str) -> None
-    def get_top_apps(self, limit: int = 12) -> List[Tuple[str, float, int, int]]
+    def get_top_apps(self, limit: int = 12, min_launches: int = 1) -> List[Tuple[str, float, int, int]]
+    def get_app_stats(self, app_id: str) -> Optional[Tuple[int, int, int]]
+    def get_total_launches(self) -> int
+    def clear_stats(self, app_id: Optional[str] = None) -> None
     def _calculate_frecency(self, launch_count: int, last_launch: int) -> float
+
+# Singleton accessor (used by all panels and scripts)
+def get_frecency_service() -> FrecencyService
 ```
 
 **Frecency Algorithm (Firefox-Style):**
@@ -231,26 +258,26 @@ ON app_stats(last_launch DESC, launch_count DESC);
 {
   "bookmarks": [
     "firefox.desktop",
-    "Alacritty.desktop",
-    "code.desktop",
     "nemo.desktop",
-    "discord.desktop",
-    "spotify-launcher.desktop"
+    "spotify-launcher.desktop",
+    "com.mitchellh.ghostty.desktop"
   ]
 }
 ```
 
 **Drag-Drop Implementation:**
 ```python
-# Each app button gets:
+# Each app button gets DragSource + DropTarget controllers
 drag_source = Gtk.DragSource()
 drag_source.set_actions(Gdk.DragAction.MOVE)
-drag_source.connect("prepare", on_drag_prepare)
+drag_source.connect("prepare", lambda src, x, y, idx=index: self._on_drag_prepare(idx))
+drag_source.connect("drag-begin", lambda src, drag: self._on_drag_begin())
 button.add_controller(drag_source)
 
-drop_target = Gtk.DropTarget()
-drop_target.set_gtypes([GObject.TYPE_STRING])
-drop_target.connect("drop", on_drop)
+drop_target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+drop_target.connect("drop", lambda tgt, val, x, y, idx=index: self._on_drop(idx))
+drop_target.connect("enter", lambda tgt, x, y: self._on_drop_enter(button))
+drop_target.connect("leave", lambda tgt: self._on_drop_leave(button))
 button.add_controller(drop_target)
 ```
 
@@ -320,29 +347,24 @@ def _refresh_apps(self):
 from gi.repository import GLib
 
 def launch_app(app, frecency_service, close_delay_ms=300):
-    """
-    Launch app, record in frecency, close launcher after delay
-    """
-    # Launch the application
+    """Launch app, record in frecency, close launcher after delay."""
     app.launch()
-
-    # Record in frecency
     frecency_service.record_launch(app.id)
+    GLib.timeout_add(close_delay_ms, lambda: _close_launcher_callback())
 
-    # Schedule auto-close
-    GLib.timeout_add(close_delay_ms, lambda: close_launcher())
+def _close_launcher_callback() -> bool:
+    """Callback for GLib.timeout_add."""
+    close_launcher()
+    return False  # Don't repeat
 
 def close_launcher():
-    """Close all ignomi windows"""
+    """Close all ignomi windows."""
     from ignis.app import IgnisApp
     app = IgnisApp.get_default()
 
-    # Close all ignomi-* windows
     for window in app.get_windows():
-        if window.namespace.startswith("ignomi-"):
-            window.hide()
-
-    return False  # Don't repeat timeout
+        if window.namespace and window.namespace.startswith("ignomi-"):
+            window.set_visible(False)  # GTK4/Ignis visibility API
 ```
 
 ## Styling & Theming
@@ -357,63 +379,76 @@ launcher/styles/
 ```
 
 **Main CSS (styles/main.css):**
+
+> **Critical GTK4 limitation:** `alpha()` cannot be used with `@define-color`
+> variables at runtime (e.g., `alpha(@bg, 0.65)` does NOT work). All alpha
+> variants must be pre-computed in the Wallust template as literal hex values
+> wrapped in `alpha()` (e.g., `@define-color bg_65 alpha(#292420, 0.65);`).
+
 ```css
-/* Panel backgrounds */
+/* Window must be transparent for RGBA backgrounds to work */
+window, window.background, .background {
+    background: transparent;
+    background-color: transparent;
+}
+
+/* Panel backgrounds -- uses pre-computed @bg_65 (65% opacity) */
 .panel {
-    background-color: alpha(@bg, 0.95);
+    background-color: @bg_65;
     color: @fg;
     border-radius: 12px;
+    border: none;
+    box-shadow: none;
     padding: 16px;
 }
 
 /* App list items */
 .app-item {
     background-color: transparent;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 12px;
-    margin: 4px 0;
-    transition: all 0.1s ease;
+    margin: 2px 0;
+    transition: all 0.15s ease;
 }
 
 .app-item:hover {
-    background-color: alpha(@accent, 0.3);
+    background-color: @color4_30;  /* Pre-computed: alpha(#BE8F53, 0.30) */
+    transform: translateX(2px);
 }
 
 .app-item:active {
-    background-color: alpha(@accent, 0.5);
+    background-color: @color6_50;  /* Pre-computed: alpha(#BFAB70, 0.50) */
     transform: scale(0.98);
 }
 
-/* Drag-drop feedback */
-.app-item.drag-hover {
-    border-top: 2px solid @accent;
-}
-
-/* Right-click confirmation */
-@keyframes bookmark-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; background-color: alpha(@success, 0.5); }
-}
-
-.bookmark-added {
-    animation: bookmark-pulse 0.3s ease;
-}
-
-/* Search panel specific */
-.search-panel .entry {
+/* Search entry */
+.search-entry {
     font-size: 16px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
+    padding: 14px 18px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    background-color: @bg_60;
+    border: 1px solid @color4_40;
+    transition: all 0.2s ease;
 }
 
-.search-results {
-    max-height: 600px;
+.search-entry:focus {
+    border-color: @color6;
+    background-color: @bg_80;
+    box-shadow: 0 0 8px @color6_30;
+}
+
+/* Keyboard navigation highlight */
+.keyboard-selected {
+    background-color: @color6_40;
+    border-left: 3px solid @color6;
 }
 
 /* Frecency badges */
 .frecency-count {
     font-size: 10px;
-    color: alpha(@fg, 0.6);
+    color: @fg_50;  /* Pre-computed: alpha(foreground, 0.50) */
+    font-style: italic;
     margin-top: 4px;
 }
 ```
@@ -422,33 +457,43 @@ launcher/styles/
 
 **Template Location:** `~/.config/wallust/templates/ignomi.css`
 
-**Template Content:**
+**Template Content (abridged -- 16 alpha variants in actual file):**
 ```css
 /* Generated by Wallust from current wallpaper */
+/* Base semantic colors */
 @define-color bg {{background}};
 @define-color fg {{foreground}};
 @define-color accent {{color3}};
 @define-color success {{color2}};
 @define-color warning {{color1}};
 @define-color error {{color5}};
+
+/* Extended palette */
+@define-color color0 {{color0}};
+/* ... @color1 through @color8 ... */
+
+/* Pre-computed alpha variants (GTK4 cannot use alpha() with @define-color vars) */
+@define-color bg_65 alpha({{background}}, 0.65);
+@define-color bg_75 alpha({{background}}, 0.75);
+@define-color bg_60 alpha({{background}}, 0.60);
+@define-color bg_80 alpha({{background}}, 0.80);
+@define-color fg_70 alpha({{foreground}}, 0.70);
+@define-color fg_50 alpha({{foreground}}, 0.50);
+@define-color accent_30 alpha({{color3}}, 0.30);
+@define-color color4_30 alpha({{color4}}, 0.30);
+/* ... 16 total pre-computed variants ... */
 ```
 
-**Wallust Configuration (wallust.toml):**
-```toml
-[templates]
-ignomi_colors = {
-    template = "ignomi.css",
-    target = "/home/komi/.config/ignomi/colors.css"
-}
-```
-
-**Loading in Ignis:**
+**Loading in Ignis (config.py):**
 ```python
 from ignis.app import IgnisApp
+import os
 
 app = IgnisApp.get_default()
-app.apply_css("/home/komi/.config/ignomi/styles/colors.css")
-app.apply_css("/home/komi/repos/ignomi/launcher/styles/main.css")
+# "user" priority (800) overrides global GTK4 CSS
+styles_dir = os.path.join(config_dir, "styles")
+app.apply_css(os.path.join(styles_dir, "colors.css"), style_priority="user")
+app.apply_css(os.path.join(styles_dir, "main.css"), style_priority="user")
 ```
 
 ## Configuration
@@ -468,15 +513,14 @@ search_height = 600
 [frecency]
 max_items = 12          # Number shown in frequent panel
 min_launches = 2        # Minimum launches before appearing
-decay_enabled = false   # Future: time-based score decay
 ```
 
 ### Hyprland Integration
 
 **Keybinding (hypr/config/keybinds.conf):**
 ```conf
-# Replace old launcher
-bindd = $mainMod, SPACE, Launch Ignomi three-panel launcher, exec, ignis open-window ignomi
+# Toggle launcher (runs toggle-launcher.sh which issues 3 toggle-window commands)
+bindd = $mainMod, SPACE, Launch Ignomi three-panel launcher, exec, ~/repos/ignomi/scripts/toggle-launcher.sh
 ```
 
 **Optional Window Rules:**
@@ -494,7 +538,10 @@ layerrule = ignorealpha 0.3, ignomi-.*
 **CLI Tool (scripts/track-launch.sh):**
 ```bash
 #!/usr/bin/env bash
+# Track app launches for frecency outside the launcher
 # Usage: track-launch.sh firefox.desktop
+
+set -euo pipefail
 
 if [ $# -eq 0 ]; then
     echo "Usage: $0 <app-id>"
@@ -508,22 +555,16 @@ python3 <<EOF
 import sys
 sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
 
-from services.frecency import FrecencyService
+from services.frecency import get_frecency_service
 
-service = FrecencyService()
+service = get_frecency_service()
 service.record_launch("$APP_ID")
 print(f"Recorded launch: $APP_ID")
 EOF
 ```
 
-**Make executable:**
-```bash
-chmod +x ~/repos/ignomi/scripts/track-launch.sh
-```
-
 **Usage:**
 ```bash
-# Track app launched outside launcher
 ~/repos/ignomi/scripts/track-launch.sh firefox.desktop
 ```
 
@@ -565,27 +606,27 @@ chmod +x ~/repos/ignomi/scripts/track-launch.sh
 
 ## Known Limitations
 
-1. **Single Monitor:** Launcher shows on primary monitor only
-2. **No Categories:** All apps in flat list (sorted by search relevance)
-3. **No Thumbnails:** Icon-only, no window previews
-4. **No History:** Frecency only, no launch history view
-5. **Manual Tracking:** External launches not auto-tracked (use CLI tool)
+1. **No Categories:** All apps in flat list (sorted by search relevance)
+2. **No Thumbnails:** Icon-only, no window previews
+3. **No History:** Frecency only, no launch history view
+4. **Manual Tracking:** External launches not auto-tracked (use CLI tool)
+5. **Hardcoded Path in bookmarks.py:** `sys.path.insert(0, '/home/komi/repos/ignomi/launcher')` -- other panels resolve dynamically
 
 ## Future Enhancements (Post-MVP)
 
-### Phase 2 Features
+### Potential Features
 - Keyboard shortcuts (Tab to switch panels)
 - Category filters (Dev, Media, Utils, etc.)
 - Custom icons per bookmark
 - Usage statistics view
 - Export/import bookmarks
-
-### Phase 3 Features
-- Multi-monitor support
 - Window previews for running apps
-- Quick actions (right-click menu)
 - System-wide launch tracking via D-Bus
 - Fuzzy search algorithm tuning
+
+### Already Implemented (Originally Planned as Future)
+- **Multi-monitor support** -- `get_monitor_under_cursor()` in helpers.py positions panels on the monitor where the cursor is located when the launcher opens. Uses `hyprctl cursorpos` + `hyprctl monitors -j` with Hyprland-to-GTK monitor ID translation.
+- **Right-click context menus** -- Bookmarks panel: "Remove from bookmarks". Frequent panel: "Remove from frequents", "Add to bookmarks". Search panel: direct bookmark add with pulse animation.
 
 ## Success Criteria
 
@@ -613,7 +654,7 @@ Project is considered successful when:
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2025-11-02
+**Document Version:** 2.0
+**Last Updated:** 2026-02-23
 **Author:** Claude Code (with user collaboration)
-**Status:** Living document - will be updated during implementation
+**Status:** Reflects implemented codebase as of 2026-02-23
