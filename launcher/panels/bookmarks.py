@@ -4,13 +4,14 @@ Bookmarks Panel - Left panel showing user-curated favorite applications.
 Features:
 - Load apps from bookmarks.json
 - Display with icons and labels
-- Right-click to remove from bookmarks
+- Right-click context menu: remove from bookmarks
 - Drag-and-drop reordering
 - Auto-saves changes
 """
 
 from ignis import widgets
 from ignis.services.applications import ApplicationsService
+from ignis.menu_model import IgnisMenuModel, IgnisMenuItem
 from gi.repository import Gtk, Gdk, GObject
 import sys
 sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
@@ -150,6 +151,9 @@ class BookmarksPanel:
         Returns:
             widgets.Button with icon, label, and drag-drop
         """
+        # Create context menu
+        menu = self._create_context_menu(app)
+
         # Main button
         button = widgets.Button(
             css_classes=["app-item"],
@@ -187,15 +191,17 @@ class BookmarksPanel:
                                 xalign=0.0
                             )
                         ]
-                    )
+                    ),
+                    # Hidden context menu (must be child of button content)
+                    menu
                 ]
             )
         )
 
-        # Add right-click handler (remove from bookmarks)
+        # Add right-click handler to show context menu
         gesture = Gtk.GestureClick()
         gesture.set_button(3)  # Right click
-        gesture.connect("pressed", lambda g, n, x, y, app=app: self._on_right_click(app))
+        gesture.connect("pressed", lambda g, n, x, y, m=menu: m.popup())
         button.add_controller(gesture)
 
         # Add drag source
@@ -221,8 +227,19 @@ class BookmarksPanel:
         close_delay = settings["launcher"]["close_delay_ms"]
         launch_app(app, self.frecency, close_delay)
 
-    def _on_right_click(self, app):
-        """Remove app from bookmarks on right-click."""
+    def _create_context_menu(self, app):
+        """Create context menu for a bookmarked app."""
+        return widgets.PopoverMenu(
+            model=IgnisMenuModel(
+                IgnisMenuItem(
+                    label="Remove from bookmarks",
+                    on_activate=lambda x, a=app: self._remove_from_bookmarks(a),
+                ),
+            )
+        )
+
+    def _remove_from_bookmarks(self, app):
+        """Remove app from bookmarks."""
         # Remove from list
         self.bookmarks = [a for a in self.bookmarks if a.id != app.id]
 

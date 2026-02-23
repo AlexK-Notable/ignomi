@@ -5,11 +5,12 @@ Features:
 - Display top N apps by frecency score
 - Auto-updates when frecency changes (GObject signal)
 - Shows usage count badge
-- Right-click to add to bookmarks
+- Right-click context menu: remove from frequents, add to bookmarks
 """
 
 from ignis import widgets
 from ignis.services.applications import ApplicationsService
+from ignis.menu_model import IgnisMenuModel, IgnisMenuItem
 from gi.repository import Gtk, GLib
 import sys
 sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
@@ -173,75 +174,102 @@ class FrequentPanel:
         Returns:
             widgets.Button with icon, label, and usage badge
         """
+        # Content box (will hold menu after button creation)
+        content_box = widgets.Box(
+            spacing=8,
+            child=[
+                # App name and description (right-aligned, no truncation)
+                widgets.Box(
+                    vertical=True,
+                    vexpand=True,
+                    hexpand=True,
+                    valign="center",
+                    child=[
+                        widgets.Label(
+                            label=app.name,
+                            css_classes=["app-name"],
+                            halign="end",
+                            wrap=True,
+                            xalign=1.0
+                        ),
+                        widgets.Label(
+                            label=app.description or "",
+                            css_classes=["app-description"],
+                            halign="end",
+                            wrap=True,
+                            wrap_mode="word_char",
+                            lines=2,
+                            xalign=1.0
+                        )
+                    ]
+                ),
+                # Icon with launch count below
+                widgets.Box(
+                    vertical=True,
+                    valign="center",
+                    halign="end",
+                    spacing=4,
+                    child=[
+                        widgets.Icon(
+                            image=app.icon,
+                            pixel_size=48,
+                            css_classes=["app-icon"]
+                        ),
+                        widgets.Label(
+                            label=f"{launch_count}×",
+                            css_classes=["frecency-count"],
+                            halign="center"
+                        )
+                    ]
+                )
+            ]
+        )
+
         button = widgets.Button(
             css_classes=["app-item"],
             on_click=lambda x, app=app: self._on_app_click(app),
-            child=widgets.Box(
-                spacing=8,
-                child=[
-                    # App name and description (right-aligned, no truncation)
-                    widgets.Box(
-                        vertical=True,
-                        vexpand=True,
-                        hexpand=True,
-                        valign="center",
-                        child=[
-                            widgets.Label(
-                                label=app.name,
-                                css_classes=["app-name"],
-                                halign="end",
-                                wrap=True,
-                                xalign=1.0
-                            ),
-                            widgets.Label(
-                                label=app.description or "",
-                                css_classes=["app-description"],
-                                halign="end",
-                                wrap=True,
-                                wrap_mode="word_char",
-                                lines=2,
-                                xalign=1.0
-                            )
-                        ]
-                    ),
-                    # Icon with launch count below
-                    widgets.Box(
-                        vertical=True,
-                        valign="center",
-                        halign="end",
-                        spacing=4,
-                        child=[
-                            widgets.Icon(
-                                image=app.icon,
-                                pixel_size=48,
-                                css_classes=["app-icon"]
-                            ),
-                            widgets.Label(
-                                label=f"{launch_count}×",
-                                css_classes=["frecency-count"],
-                                halign="center"
-                            )
-                        ]
-                    )
-                ]
-            )
+            child=content_box
         )
 
-        # Add right-click handler (add to bookmarks)
+        # Create context menu (after button exists for visual feedback reference)
+        menu = self._create_context_menu(app, button)
+        content_box.append(menu)
+
+        # Add right-click handler to show context menu
         gesture = Gtk.GestureClick()
         gesture.set_button(3)  # Right click
-        gesture.connect("pressed", lambda g, n, x, y, app=app, btn=button: self._on_right_click(app, btn))
+        gesture.connect("pressed", lambda g, n, x, y, m=menu: m.popup())
         button.add_controller(gesture)
 
         return button
+
+    def _create_context_menu(self, app, button):
+        """Create context menu for a frequent app."""
+        return widgets.PopoverMenu(
+            model=IgnisMenuModel(
+                IgnisMenuItem(
+                    label="Remove from frequents",
+                    on_activate=lambda x, a=app: self._remove_from_frequents(a),
+                ),
+                IgnisMenuItem(
+                    label="Add to bookmarks",
+                    on_activate=lambda x, a=app, b=button: self._add_to_bookmarks(a, b),
+                ),
+            )
+        )
 
     def _on_app_click(self, app):
         """Launch app when clicked."""
         close_delay = self.settings["launcher"]["close_delay_ms"]
         launch_app(app, self.frecency, close_delay)
 
-    def _on_right_click(self, app, button):
-        """Add app to bookmarks on right-click."""
+    def _remove_from_frequents(self, app):
+        """Remove app from frecency tracking."""
+        self.frecency.clear_stats(app.id)
+        # UI refreshes automatically via frecency "changed" signal
+
+    def _add_to_bookmarks(self, app, button):
+        """Add app to bookmarks."""
         if not is_bookmarked(app.id):
             add_bookmark(app.id)
 
@@ -250,8 +278,6 @@ class FrequentPanel:
 
             # Remove the CSS class after animation completes (300ms)
             GLib.timeout_add(300, lambda: button.remove_css_class("bookmark-added"))
-
-            print(f"Added {app.name} to bookmarks")
 
             # Refresh bookmarks panel to show new item
             from ignis.app import IgnisApp
