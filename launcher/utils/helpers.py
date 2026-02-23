@@ -15,32 +15,6 @@ import json
 from typing import Dict, Any, Optional
 
 
-def get_focused_monitor() -> int:
-    """
-    Get the ID of the currently focused monitor in Hyprland.
-
-    Returns:
-        Monitor ID (int), defaults to 0 if detection fails
-    """
-    try:
-        result = subprocess.run(
-            ['hyprctl', 'monitors', '-j'],
-            capture_output=True,
-            text=True,
-            timeout=1
-        )
-        if result.returncode == 0:
-            monitors = json.loads(result.stdout)
-            for monitor in monitors:
-                if monitor.get('focused', False):
-                    return monitor['id']
-    except Exception:
-        pass
-
-    # Fallback to monitor 0
-    return 0
-
-
 def hyprland_monitor_to_ignis_monitor(hyprland_id: int) -> int:
     """
     Convert Hyprland monitor ID to Ignis/GTK monitor ID.
@@ -220,12 +194,6 @@ def load_settings() -> Dict[str, Any]:
             "launcher": {
                 "close_delay_ms": 300
             },
-            "panels": {
-                "bookmark_width": 300,
-                "frequent_width": 300,
-                "search_width": 500,
-                "search_height": 600
-            },
             "frecency": {
                 "max_items": 12,
                 "min_launches": 2
@@ -236,12 +204,6 @@ def load_settings() -> Dict[str, Any]:
     defaults = {
         "launcher": {
             "close_delay_ms": 300,
-        },
-        "panels": {
-            "bookmark_width": 300,
-            "frequent_width": 300,
-            "search_width": 500,
-            "search_height": 600,
         },
         "frecency": {
             "max_items": 12,
@@ -384,24 +346,3 @@ def is_bookmarked(app_id: str) -> bool:
     return app_id in bookmarks
 
 
-def reorder_bookmarks(app_id: str, new_index: int):
-    """
-    Move a bookmark to a new position.
-
-    Args:
-        app_id: Desktop file ID to move
-        new_index: New position (0-indexed)
-
-    If app_id not found, does nothing.
-    """
-    bookmarks = load_bookmarks()
-
-    if app_id in bookmarks:
-        # Remove from current position
-        bookmarks.remove(app_id)
-
-        # Insert at new position
-        new_index = max(0, min(new_index, len(bookmarks)))
-        bookmarks.insert(new_index, app_id)
-
-        save_bookmarks(bookmarks)

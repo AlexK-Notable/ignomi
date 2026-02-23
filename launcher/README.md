@@ -151,7 +151,6 @@ Shared functions used across all panels.
 | `load_bookmarks()` / `save_bookmarks(ids)` | Read/write `data/bookmarks.json` |
 | `add_bookmark(app_id)` / `remove_bookmark(app_id)` | Modify bookmarks list |
 | `is_bookmarked(app_id)` | Check if app is bookmarked |
-| `get_focused_monitor()` | Get Hyprland's focused monitor ID |
 | `hyprland_monitor_to_ignis_monitor(id)` | Translate Hyprland monitor ID to GTK monitor index |
 
 ## Cross-Panel Communication

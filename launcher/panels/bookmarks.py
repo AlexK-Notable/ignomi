@@ -14,7 +14,9 @@ from ignis.services.applications import ApplicationsService
 from ignis.menu_model import IgnisMenuModel, IgnisMenuItem
 from gi.repository import Gtk, Gdk, GObject
 import sys
-sys.path.insert(0, '/home/komi/repos/ignomi/launcher')
+import os
+# Add launcher directory to path dynamically (works from any location/worktree)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.helpers import load_bookmarks, save_bookmarks, launch_app, remove_bookmark, get_monitor_under_cursor
 from services.frecency import get_frecency_service

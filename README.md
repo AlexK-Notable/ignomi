@@ -305,7 +305,7 @@ ls -la ~/repos/ignomi/launcher/styles/colors.css
 
 ## License
 
-License not yet specified. <!-- TODO: Add LICENSE file -->
+[MIT License](LICENSE)
 
 ## Credits
 

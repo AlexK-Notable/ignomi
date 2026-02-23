@@ -82,8 +82,7 @@ Panels communicate via:
 - Main Ignis configuration file (symlinked to `~/.config/ignis/config.py`)
 - Creates all three panel instances
 - Loads CSS styling (colors.css from Wallust, main.css for structure)
-- Uses dynamic path resolution via `os.path.realpath(__file__)`
-- **IMPORTANT**: `bookmarks.py` and `frequent.py` contain hardcoded `sys.path.insert` paths assuming project is at `/home/komi/repos/ignomi`
+- All panels use dynamic path resolution via `os.path` for portability
 
 ## Critical Implementation Details
 
@@ -161,7 +160,7 @@ sqlite3 ~/.local/share/ignomi/app_usage.db "SELECT * FROM app_stats ORDER BY las
 - **Changing multiple things at once**: Change one variable at a time
 - **Forgetting to reload**: Run `ignis reload` after CSS/Python changes
 - **Wrong monitor**: Verify monitor index in panel window definitions matches your setup
-- **Path assumptions**: Check hardcoded `sys.path.insert` in `bookmarks.py` and `frequent.py` if cloned to non-standard location
+- **Path assumptions**: All panels use dynamic `os.path` resolution, but check `config.py` symlink points to correct location
 
 See `project-docs/discoveries/systematic-debugging-phase1-theming.md` for systematic debugging methodology.
 

@@ -1,0 +1,12 @@
+# Ignomi Launcher Settings
+
+[launcher]
+# Time in milliseconds before auto-closing launcher after app launch
+close_delay_ms = 300
+
+[frecency]
+# Maximum number of apps to show in frequent panel
+max_items = 12
+
+# Minimum launches before appearing in frequent panel
+min_launches = 2
