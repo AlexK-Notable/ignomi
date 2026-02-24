@@ -1,0 +1,40 @@
+# Custom Commands for Ignomi Launcher
+#
+# Usage: Type "!command_name" in the search bar
+# Type "!" alone to see all available commands
+#
+# Format:
+#   [commands.name]
+#   description = "What this command does"
+#   exec = "shell command to run"
+#   icon = "icon-name"  # GTK icon name (optional)
+
+[commands.lock]
+description = "Lock screen"
+exec = "hyprlock"
+icon = "system-lock-screen"
+
+[commands.suspend]
+description = "Suspend system"
+exec = "systemctl suspend"
+icon = "system-suspend"
+
+[commands.logout]
+description = "Log out of Hyprland"
+exec = "hyprctl dispatch exit"
+icon = "system-log-out"
+
+[commands.reboot]
+description = "Reboot system"
+exec = "systemctl reboot"
+icon = "system-reboot"
+
+[commands.shutdown]
+description = "Shut down system"
+exec = "systemctl poweroff"
+icon = "system-shutdown"
+
+[commands.reload]
+description = "Reload Ignis configuration"
+exec = "goignis reload"
+icon = "view-refresh"

@@ -192,6 +192,60 @@ scrollbar slider:hover {
     animation: bookmark-pulse 0.3s ease;
 }
 
+/* System controls inline widgets */
+.control-row {
+    padding: 12px 16px;
+    background-color: @color4_20;
+    border-radius: 8px;
+    margin: 2px 0;
+}
+
+.control-label {
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 80px;
+}
+
+.control-value {
+    font-size: 13px;
+    color: @fg_70;
+    min-width: 40px;
+}
+
+.control-scale trough {
+    min-height: 6px;
+    border-radius: 3px;
+    background-color: @bg_60;
+}
+
+.control-scale highlight {
+    border-radius: 3px;
+    background-color: @color6;
+}
+
+.control-scale slider {
+    min-width: 16px;
+    min-height: 16px;
+    border-radius: 50%;
+    background-color: @fg;
+}
+
+.control-switch {
+    min-width: 40px;
+}
+
+/* Result type badges */
+.result-calculator .app-name,
+.result-web .app-name,
+.result-command .app-name {
+    font-family: monospace;
+}
+
+.result-calculator .app-description {
+    color: @fg_50;
+    font-style: italic;
+}
+
 /* Panel-specific adjustments */
 .bookmarks-panel,
 .frequent-panel {

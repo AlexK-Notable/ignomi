@@ -11,13 +11,17 @@ Features:
 from ignis import widgets
 from ignis.services.applications import ApplicationsService
 from ignis.menu_model import IgnisMenuModel, IgnisMenuItem
-from gi.repository import Gtk, GLib
+from gi.repository import Gtk
 import sys
 import os
 # Add launcher directory to path dynamically (works from any location/worktree)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.helpers import launch_app, add_bookmark, is_bookmarked, load_settings, get_monitor_under_cursor
+from utils.helpers import (
+    launch_app, load_settings, get_monitor_under_cursor,
+    clear_container, find_app_by_id, add_bookmark_with_refresh,
+    update_window_monitor,
+)
 from services.frecency import get_frecency_service
 
 
@@ -60,25 +64,18 @@ class FrequentPanel:
 
         apps = []
         for app_id, score, count, last_launch in top_data:
-            app = self._find_app_by_id(app_id)
+            app = find_app_by_id(app_id)
             if app:
                 apps.append((app, score, count))
 
         return apps
 
-    def _find_app_by_id(self, app_id):
-        """Find Application object by desktop ID."""
-        for app in self.apps_service.apps:
-            if app.id == app_id:
-                return app
-        return None
-
     def create_window(self):
         """
-        Create the frequent apps panel window.
+        Create the frequent apps panel window with slide animation.
 
         Returns:
-            widgets.Window positioned on right edge
+            widgets.RevealerWindow positioned on right edge
         """
         # Create app list container
         self.app_list_box = widgets.Box(
@@ -90,49 +87,61 @@ class FrequentPanel:
         # Populate with frequent apps
         self._refresh_app_list()
 
-        window = widgets.Window(
+        # Panel content
+        content = widgets.Box(
+            vertical=True,
+            vexpand=True,
+            valign="center",
+            child=[
+                widgets.Box(
+                    vertical=True,
+                    css_classes=["panel", "frequent-panel"],
+                    child=[
+                        widgets.Label(
+                            label="Frequent",
+                            css_classes=["panel-header"],
+                            halign="center"
+                        ),
+                        widgets.Scroll(
+                            hexpand=True,
+                            min_content_width=280,
+                            propagate_natural_height=True,
+                            child=self.app_list_box
+                        )
+                    ]
+                )
+            ]
+        )
+
+        # Revealer for slide-in animation (from right)
+        anim_duration = self.settings.get("animation", {}).get("transition_duration", 200)
+        revealer = widgets.Revealer(
+            transition_type="slide_left",
+            transition_duration=anim_duration,
+            reveal_child=True,
+            child=content,
+        )
+
+        # Box wrapper required by RevealerWindow
+        revealer_box = widgets.Box(child=[revealer])
+
+        window = widgets.RevealerWindow(
+            revealer=revealer,
             namespace="ignomi-frequent",
             css_classes=["ignomi-window"],
             monitor=get_monitor_under_cursor(),
             anchor=["right", "top", "bottom"],
             exclusivity="exclusive",
-            kb_mode="on_demand",  # Allow mouse interaction
+            kb_mode="on_demand",
             layer="top",
             default_width=320,
-            visible=False,  # Start hidden, show via hotkey
-            margin_top=8,  # Layer Shell margins (outside window, no background bleed)
+            visible=False,
+            margin_top=8,
             margin_bottom=8,
             margin_right=8,
-            child=widgets.Box(
-                vertical=True,
-                vexpand=True,
-                valign="center",
-                child=[
-                    # Panel background wraps content
-                    widgets.Box(
-                        vertical=True,
-                        css_classes=["panel", "frequent-panel"],
-                        child=[
-                            # Header (horizontally centered)
-                            widgets.Label(
-                                label="Frequent",
-                                css_classes=["panel-header"],
-                                halign="center"
-                            ),
-                            # Scrollable app list (grows with content)
-                            widgets.Scroll(
-                                hexpand=True,
-                                min_content_width=280,
-                                propagate_natural_height=True,
-                                child=self.app_list_box
-                            )
-                        ]
-                    )
-                ]
-            )
+            child=revealer_box,
         )
 
-        # Add signal handler to update monitor when window becomes visible
         window.connect("notify::visible", self._on_visibility_changed)
 
         return window
@@ -144,12 +153,7 @@ class FrequentPanel:
 
     def _refresh_app_list(self):
         """Rebuild the app list from current top apps."""
-        # Clear existing (GTK4 way)
-        child = self.app_list_box.get_first_child()
-        while child:
-            next_child = child.get_next_sibling()
-            self.app_list_box.remove(child)
-            child = next_child
+        clear_container(self.app_list_box)
 
         # Add frequent app buttons
         if self.top_apps:
@@ -272,26 +276,9 @@ class FrequentPanel:
 
     def _add_to_bookmarks(self, app, button):
         """Add app to bookmarks."""
-        if not is_bookmarked(app.id):
-            add_bookmark(app.id)
-
-            # Visual feedback: Add pulse animation CSS class
-            button.add_css_class("bookmark-added")
-
-            # Remove the CSS class after animation completes (300ms)
-            GLib.timeout_add(300, lambda: button.remove_css_class("bookmark-added"))
-
-            # Refresh bookmarks panel to show new item
-            from ignis.app import IgnisApp
-            app_instance = IgnisApp.get_default()
-            bookmarks_window = app_instance.get_window("ignomi-bookmarks")
-            if bookmarks_window and hasattr(bookmarks_window, 'panel'):
-                bookmarks_window.panel.refresh_from_disk()
+        add_bookmark_with_refresh(app.id, button)
 
     def _on_visibility_changed(self, window, param):
         """Update monitor placement when window becomes visible."""
         if window.get_visible():
-            # Window is being shown - update to monitor under cursor
-            cursor_monitor = get_monitor_under_cursor()
-            if window.monitor != cursor_monitor:
-                window.monitor = cursor_monitor
+            update_window_monitor(window)

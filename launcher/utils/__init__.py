@@ -14,6 +14,10 @@ from .helpers import (
     is_bookmarked,
     get_monitor_under_cursor,
     hyprland_monitor_to_ignis_monitor,
+    clear_container,
+    find_app_by_id,
+    add_bookmark_with_refresh,
+    update_window_monitor,
 )
 
 __all__ = [
@@ -27,4 +31,8 @@ __all__ = [
     "is_bookmarked",
     "get_monitor_under_cursor",
     "hyprland_monitor_to_ignis_monitor",
+    "clear_container",
+    "find_app_by_id",
+    "add_bookmark_with_refresh",
+    "update_window_monitor",
 ]

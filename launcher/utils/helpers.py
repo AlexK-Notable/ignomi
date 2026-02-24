@@ -5,22 +5,48 @@ Provides common functions used across multiple panels:
 - App launching with frecency tracking
 - Launcher window management
 - Settings loading
+- Monitor detection via HyprlandService IPC
+- Shared UI operations (container clearing, bookmark management)
 """
 
-from gi.repository import GLib
+from gi.repository import GLib, Gdk
 from pathlib import Path
 import toml
-import subprocess
 import json
 from typing import Dict, Any, Optional
+
+from ignis.services.applications import ApplicationsService
+from ignis.services.hyprland import HyprlandService
+
+
+def _hyprland_name_to_ignis_index(connector_name: str) -> int:
+    """
+    Convert a Hyprland monitor connector name to a GTK/Ignis monitor index.
+
+    Args:
+        connector_name: Monitor connector name (e.g., "DP-1", "HDMI-A-1")
+
+    Returns:
+        Corresponding GTK monitor index, or 0 if not found
+    """
+    display = Gdk.Display.get_default()
+    if not display:
+        return 0
+
+    monitors = display.get_monitors()
+    for i in range(monitors.get_n_items()):
+        monitor = monitors.get_item(i)
+        if monitor.get_connector() == connector_name:
+            return i
+
+    return 0
 
 
 def hyprland_monitor_to_ignis_monitor(hyprland_id: int) -> int:
     """
     Convert Hyprland monitor ID to Ignis/GTK monitor ID.
 
-    Hyprland and GTK enumerate monitors in different orders. This function
-    translates by matching connector names.
+    Uses HyprlandService IPC instead of subprocess calls.
 
     Args:
         hyprland_id: Monitor ID from Hyprland
@@ -29,43 +55,11 @@ def hyprland_monitor_to_ignis_monitor(hyprland_id: int) -> int:
         Corresponding Ignis/GTK monitor ID, or 0 if not found
     """
     try:
-        # Get Hyprland monitor info
-        result = subprocess.run(
-            ['hyprctl', 'monitors', '-j'],
-            capture_output=True,
-            text=True,
-            timeout=1
-        )
-        if result.returncode != 0:
-            return 0
-
-        hyprland_monitors = json.loads(result.stdout)
-
-        # Find connector name for this Hyprland ID
-        connector_name = None
-        for monitor in hyprland_monitors:
-            if monitor['id'] == hyprland_id:
-                connector_name = monitor['name']
-                break
-
-        if not connector_name:
-            return 0
-
-        # Now find which GTK monitor has this connector
-        from gi.repository import Gdk
-        display = Gdk.Display.get_default()
-        if not display:
-            return 0
-
-        monitors = display.get_monitors()
-        for i in range(monitors.get_n_items()):
-            monitor = monitors.get_item(i)
-            gtk_connector = monitor.get_connector()
-            if gtk_connector == connector_name:
-                return i
-
+        hyprland = HyprlandService.get_default()
+        for monitor in hyprland.monitors:
+            if monitor.id == hyprland_id:
+                return _hyprland_name_to_ignis_index(monitor.name)
         return 0
-
     except Exception:
         return 0
 
@@ -74,61 +68,106 @@ def get_monitor_under_cursor() -> int:
     """
     Get the ID of the monitor where the cursor is currently located.
 
-    Uses hyprctl to get cursor position and monitor geometries,
-    then determines which monitor contains the cursor.
+    Uses HyprlandService IPC for monitor data and cursor position.
 
     Returns:
         Monitor ID (int), defaults to 0 if detection fails
     """
     try:
-        # Get cursor position
-        cursor_result = subprocess.run(
-            ['hyprctl', 'cursorpos'],
-            capture_output=True,
-            text=True,
-            timeout=1
-        )
-        if cursor_result.returncode != 0:
-            return 0
+        hyprland = HyprlandService.get_default()
 
-        # Parse cursor position (format: "x, y")
-        cursor_pos = cursor_result.stdout.strip().split(', ')
+        # Get cursor position via IPC (format: "x, y")
+        cursor_raw = hyprland.send_command("cursorpos").strip()
+        cursor_pos = cursor_raw.split(', ')
         if len(cursor_pos) != 2:
             return 0
         cursor_x = int(cursor_pos[0])
         cursor_y = int(cursor_pos[1])
 
-        # Get monitor geometries
-        monitors_result = subprocess.run(
-            ['hyprctl', 'monitors', '-j'],
-            capture_output=True,
-            text=True,
-            timeout=1
-        )
-        if monitors_result.returncode != 0:
-            return 0
-
-        monitors = json.loads(monitors_result.stdout)
-
-        # Find which monitor contains the cursor
-        for monitor in monitors:
-            x = monitor['x']
-            y = monitor['y']
-            width = monitor['width']
-            height = monitor['height']
-            mon_id = monitor['id']
-
-            # Check if cursor is within this monitor's bounds
-            if x <= cursor_x < x + width and y <= cursor_y < y + height:
-                # Translate Hyprland ID to Ignis ID
-                ignis_id = hyprland_monitor_to_ignis_monitor(mon_id)
-                return ignis_id
+        # Find which monitor contains the cursor using cached monitor data
+        for monitor in hyprland.monitors:
+            if (monitor.x <= cursor_x < monitor.x + monitor.width
+                    and monitor.y <= cursor_y < monitor.y + monitor.height):
+                return _hyprland_name_to_ignis_index(monitor.name)
 
     except Exception:
         pass
 
-    # Fallback to monitor 0
     return 0
+
+
+# -- Shared UI utilities --
+
+def clear_container(container) -> None:
+    """
+    Remove all children from a GTK4 container widget.
+
+    Args:
+        container: Any GTK4 widget that supports get_first_child/remove
+    """
+    child = container.get_first_child()
+    while child:
+        next_child = child.get_next_sibling()
+        container.remove(child)
+        child = next_child
+
+
+def find_app_by_id(app_id: str):
+    """
+    Find an Application object by its desktop file ID.
+
+    Args:
+        app_id: Desktop file ID (e.g., "firefox.desktop")
+
+    Returns:
+        Application object, or None if not found
+    """
+    apps_service = ApplicationsService.get_default()
+    for app in apps_service.apps:
+        if app.id == app_id:
+            return app
+    return None
+
+
+def add_bookmark_with_refresh(app_id: str, button=None) -> None:
+    """
+    Add an app to bookmarks with visual feedback and cross-panel refresh.
+
+    Args:
+        app_id: Desktop file ID to bookmark
+        button: Optional button widget for CSS pulse feedback
+    """
+    if is_bookmarked(app_id):
+        return
+
+    add_bookmark(app_id)
+
+    # Visual feedback on the triggering button
+    if button:
+        button.add_css_class("bookmark-added")
+        GLib.timeout_add(300, lambda: button.remove_css_class("bookmark-added"))
+
+    # Refresh bookmarks panel
+    from ignis.app import IgnisApp
+    app_instance = IgnisApp.get_default()
+    bookmarks_window = app_instance.get_window("ignomi-bookmarks")
+    if bookmarks_window and hasattr(bookmarks_window, 'panel'):
+        bookmarks_window.panel.refresh_from_disk()
+
+
+def update_window_monitor(window) -> None:
+    """
+    Update a window's monitor to match the cursor's current position.
+
+    Call this in visibility-changed handlers to ensure panels
+    appear on the correct monitor.
+
+    Args:
+        window: An Ignis Window widget
+    """
+    cursor_monitor = get_monitor_under_cursor()
+    if window.monitor != cursor_monitor:
+        window.monitor = cursor_monitor
 
 
 def launch_app(app, frecency_service, close_delay_ms: int = 300):
@@ -208,6 +247,13 @@ def load_settings() -> Dict[str, Any]:
         "frecency": {
             "max_items": 12,
             "min_launches": 2,
+        },
+        "search": {
+            "max_results": 30,
+            "fuzzy_threshold": 50,
+        },
+        "animation": {
+            "transition_duration": 200,
         },
     }
 

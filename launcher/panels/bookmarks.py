@@ -18,7 +18,11 @@ import os
 # Add launcher directory to path dynamically (works from any location/worktree)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.helpers import load_bookmarks, save_bookmarks, launch_app, remove_bookmark, get_monitor_under_cursor
+from utils.helpers import (
+    load_bookmarks, save_bookmarks, launch_app, remove_bookmark,
+    get_monitor_under_cursor, clear_container, find_app_by_id,
+    update_window_monitor, load_settings,
+)
 from services.frecency import get_frecency_service
 
 
@@ -32,44 +36,22 @@ class BookmarksPanel:
     def __init__(self):
         self.apps_service = ApplicationsService.get_default()
         self.frecency = get_frecency_service()
+        self.settings = load_settings()
 
         # Load bookmarks from JSON
         bookmark_ids = load_bookmarks()
-        self.bookmarks = self._load_bookmark_apps(bookmark_ids)
+        self.bookmarks = [app for app_id in bookmark_ids
+                          if (app := find_app_by_id(app_id))]
 
         # Track drag state
         self.drag_source_index = None
 
-    def _load_bookmark_apps(self, bookmark_ids):
-        """
-        Convert bookmark IDs to Application objects.
-
-        Args:
-            bookmark_ids: List of desktop file IDs
-
-        Returns:
-            List of Application objects (filters out not found)
-        """
-        apps = []
-        for app_id in bookmark_ids:
-            app = self._find_app_by_id(app_id)
-            if app:
-                apps.append(app)
-        return apps
-
-    def _find_app_by_id(self, app_id):
-        """Find Application object by desktop ID."""
-        for app in self.apps_service.apps:
-            if app.id == app_id:
-                return app
-        return None
-
     def create_window(self):
         """
-        Create the bookmarks panel window.
+        Create the bookmarks panel window with slide animation.
 
         Returns:
-            widgets.Window positioned on left edge
+            widgets.RevealerWindow positioned on left edge
         """
         # Create scrollable app list
         self.app_list_box = widgets.Box(
@@ -81,63 +63,69 @@ class BookmarksPanel:
         # Populate with bookmark buttons
         self._refresh_app_list()
 
-        window = widgets.Window(
+        # Panel content
+        content = widgets.Box(
+            vertical=True,
+            vexpand=True,
+            valign="center",
+            child=[
+                widgets.Box(
+                    vertical=True,
+                    css_classes=["panel", "bookmarks-panel"],
+                    child=[
+                        widgets.Label(
+                            label="Bookmarks",
+                            css_classes=["panel-header"],
+                            halign="center"
+                        ),
+                        widgets.Scroll(
+                            hexpand=True,
+                            min_content_width=280,
+                            propagate_natural_height=True,
+                            child=self.app_list_box
+                        )
+                    ]
+                )
+            ]
+        )
+
+        # Revealer for slide-in animation (from left)
+        anim_duration = self.settings.get("animation", {}).get("transition_duration", 200)
+        revealer = widgets.Revealer(
+            transition_type="slide_right",
+            transition_duration=anim_duration,
+            reveal_child=True,
+            child=content,
+        )
+
+        # Box wrapper required by RevealerWindow
+        revealer_box = widgets.Box(child=[revealer])
+
+        window = widgets.RevealerWindow(
+            revealer=revealer,
             namespace="ignomi-bookmarks",
             css_classes=["ignomi-window"],
             monitor=get_monitor_under_cursor(),
             anchor=["left", "top", "bottom"],
             exclusivity="exclusive",
-            kb_mode="on_demand",  # Allow mouse interaction
+            kb_mode="on_demand",
             layer="top",
             default_width=320,
-            visible=False,  # Start hidden, show via hotkey
-            margin_top=8,  # Layer Shell margins (outside window, no background bleed)
+            visible=False,
+            margin_top=8,
             margin_bottom=8,
             margin_left=8,
-            child=widgets.Box(
-                vertical=True,
-                vexpand=True,
-                valign="center",
-                child=[
-                    # Panel background wraps content
-                    widgets.Box(
-                        vertical=True,
-                        css_classes=["panel", "bookmarks-panel"],
-                        child=[
-                            # Header (horizontally centered)
-                            widgets.Label(
-                                label="Bookmarks",
-                                css_classes=["panel-header"],
-                                halign="center"
-                            ),
-                            # Scrollable app list (grows with content)
-                            widgets.Scroll(
-                                hexpand=True,
-                                min_content_width=280,
-                                propagate_natural_height=True,
-                                child=self.app_list_box
-                            )
-                        ]
-                    )
-                ]
-            )
+            child=revealer_box,
         )
 
-        # Add signal handler to update monitor when window becomes visible
         window.connect("notify::visible", self._on_visibility_changed)
 
         return window
 
     def _refresh_app_list(self):
         """Rebuild the app list from current bookmarks."""
-        # Clear existing (GTK4 way)
-        child = self.app_list_box.get_first_child()
-        while child:
-            next_child = child.get_next_sibling()
-            self.app_list_box.remove(child)
-            child = next_child
+        clear_container(self.app_list_box)
 
-        # Add bookmark buttons
         for index, app in enumerate(self.bookmarks):
             button = self._create_app_button(app, index)
             self.app_list_box.append(button)
@@ -224,9 +212,7 @@ class BookmarksPanel:
 
     def _on_app_click(self, app):
         """Launch app when clicked."""
-        from utils.helpers import load_settings
-        settings = load_settings()
-        close_delay = settings["launcher"]["close_delay_ms"]
+        close_delay = self.settings["launcher"]["close_delay_ms"]
         launch_app(app, self.frecency, close_delay)
 
     def _create_context_menu(self, app):
@@ -310,25 +296,12 @@ class BookmarksPanel:
 
     def refresh_from_disk(self):
         """Reload bookmarks from disk and refresh UI (can be called externally)."""
-        from utils.helpers import load_bookmarks
-
-        # Reload bookmarks from disk
         bookmark_ids = load_bookmarks()
-
-        # Convert IDs to app objects
-        self.bookmarks = []
-        for app_id in bookmark_ids:
-            app = self._find_app_by_id(app_id)
-            if app:
-                self.bookmarks.append(app)
-
-        # Refresh the UI
+        self.bookmarks = [app for app_id in bookmark_ids
+                          if (app := find_app_by_id(app_id))]
         self._refresh_app_list()
 
     def _on_visibility_changed(self, window, param):
         """Update monitor placement when window becomes visible."""
         if window.get_visible():
-            # Window is being shown - update to monitor under cursor
-            cursor_monitor = get_monitor_under_cursor()
-            if window.monitor != cursor_monitor:
-                window.monitor = cursor_monitor
+            update_window_monitor(window)

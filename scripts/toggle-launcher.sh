@@ -6,7 +6,7 @@
 # Focus is handled by Python code that moves cursor to search entry.
 
 # Toggle all three panels (visibility signal will handle monitor placement)
-ignis toggle-window ignomi-bookmarks &
-ignis toggle-window ignomi-search &
-ignis toggle-window ignomi-frequent &
+goignis toggle-window ignomi-bookmarks &
+goignis toggle-window ignomi-search &
+goignis toggle-window ignomi-frequent &
 wait

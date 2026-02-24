@@ -2,11 +2,9 @@
 Search Panel - Center panel with search entry and filtered results.
 
 Features:
-- Search entry with placeholder text
-- Real-time filtering using ApplicationsService.search()
-- Display results with icons and labels (center-aligned)
-- Right-click to add to bookmarks with seamless refresh
-- Keyboard navigation (arrow keys, Enter to launch)
+- Query router dispatches to typed handlers (app search, calculator, etc.)
+- Real-time filtering with keyboard navigation
+- Right-click to add apps to bookmarks
 - Auto-focus search field when launcher opens
 - Clear search term when launcher closes
 """
@@ -19,55 +17,71 @@ import os
 # Add launcher directory to path dynamically (works from any location/worktree)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.helpers import launch_app, add_bookmark, is_bookmarked, get_monitor_under_cursor
+from utils.helpers import (
+    launch_app, get_monitor_under_cursor, load_settings,
+    clear_container, add_bookmark_with_refresh, update_window_monitor,
+)
 from services.frecency import get_frecency_service
+from search.router import QueryRouter, ResultItem
+from search.handlers import (
+    AppSearchHandler, CalculatorHandler,
+    SystemControlsHandler, WebSearchHandler, CustomCommandsHandler,
+)
 
 
 class SearchPanel:
     """
-    Center panel providing app search functionality.
+    Center panel providing search functionality via pluggable query router.
 
-    Filters all installed applications based on user input.
+    Handlers are registered with priorities — the first matching handler
+    produces the results. App search is the fallback.
     """
 
     def __init__(self):
         self.apps_service = ApplicationsService.get_default()
         self.frecency = get_frecency_service()
+        self.settings = load_settings()
 
-        self.all_apps = self.apps_service.apps
-        self.filtered_apps = self.all_apps[:20]  # Show top 20 by default
+        # Initialize query router with handlers (priority order)
+        search_settings = self.settings.get("search", {})
+        self.router = QueryRouter()
+        self.router.register(SystemControlsHandler())   # 50: system controls
+        self.router.register(CalculatorHandler())        # 100: math expressions
+        self.router.register(WebSearchHandler())         # 200: web search
+        self.router.register(CustomCommandsHandler())    # 300: custom commands
+        self.router.register(AppSearchHandler(           # 1000: app search (fallback)
+            max_results=search_settings.get("max_results", 30),
+            fuzzy_threshold=search_settings.get("fuzzy_threshold", 50),
+        ))
+
+        # Current results from router
+        self.current_results: list[ResultItem] = []
+        self.current_handler = "app_search"
 
         # Widgets (created in create_window)
         self.search_entry = None
         self.results_box = None
 
         # Keyboard navigation
-        self.selected_index = -1  # -1 means no selection
-        self.result_buttons = []  # Track buttons for keyboard navigation
+        self.selected_index = -1
+        self.result_buttons = []
 
     def create_window(self):
         """
-        Create the search panel window.
+        Create the search panel window with slide animation.
 
         Returns:
-            widgets.Window positioned at top center
+            widgets.RevealerWindow positioned at top center
         """
-        # Search entry with center alignment
         self.search_entry = widgets.Entry(
             placeholder_text="Search applications...",
             css_classes=["search-entry"],
             on_change=lambda x: self._on_search_changed()
         )
-        # Center the text in the entry
         self.search_entry.set_alignment(0.5)
 
-        # Handle Enter key via Entry's activate signal
         self.search_entry.connect("activate", lambda entry: self._on_entry_activate())
 
-        # Keyboard navigation is handled by window-level controller in CAPTURE phase
-        # (see window creation below - captures arrows before GTK's default focus switching)
-
-        # Results container
         self.results_box = widgets.Box(
             vertical=True,
             spacing=2,
@@ -75,145 +89,136 @@ class SearchPanel:
         )
 
         # Initial population
-        self._update_results()
+        self._on_search_changed()
 
-        window = widgets.Window(
+        # Panel content
+        content = widgets.Box(
+            vertical=True,
+            vexpand=True,
+            valign="center",
+            child=[
+                widgets.Box(
+                    vertical=True,
+                    css_classes=["panel", "search-panel"],
+                    child=[
+                        self.search_entry,
+                        widgets.Scroll(
+                            hexpand=True,
+                            max_content_height=500,
+                            propagate_natural_height=True,
+                            child=self.results_box
+                        )
+                    ]
+                )
+            ]
+        )
+
+        # Revealer for slide-down animation
+        anim_duration = self.settings.get("animation", {}).get("transition_duration", 200)
+        revealer = widgets.Revealer(
+            transition_type="slide_down",
+            transition_duration=anim_duration,
+            reveal_child=True,
+            child=content,
+        )
+
+        # Box wrapper required by RevealerWindow
+        revealer_box = widgets.Box(child=[revealer])
+
+        window = widgets.RevealerWindow(
+            revealer=revealer,
             namespace="ignomi-search",
             css_classes=["ignomi-window"],
             monitor=get_monitor_under_cursor(),
             anchor=["top", "bottom"],
             exclusivity="normal",
-            kb_mode="on_demand",  # Allow interaction while focused
+            kb_mode="on_demand",
             layer="top",
             default_width=600,
-            visible=False,  # Start hidden, show via hotkey
-            margin_top=8,  # Layer Shell margin (outside window, no background bleed)
+            visible=False,
+            margin_top=8,
             margin_bottom=8,
-            child=widgets.Box(
-                vertical=True,
-                vexpand=True,
-                valign="center",
-                child=[
-                    # Panel background wraps content
-                    widgets.Box(
-                        vertical=True,
-                        css_classes=["panel", "search-panel"],
-                        child=[
-                            # Search entry
-                            self.search_entry,
-                            # Scrollable results (grows with content)
-                            widgets.Scroll(
-                                hexpand=True,
-                                max_content_height=500,
-                                propagate_natural_height=True,
-                                child=self.results_box
-                            )
-                        ]
-                    )
-                ]
-            )
+            child=revealer_box,
         )
 
-        # Add keyboard event controller in CAPTURE phase to intercept arrow keys
-        # BEFORE GTK's default key bindings move focus away from search entry
+        # Keyboard controller in CAPTURE phase to intercept arrows
         key_controller = Gtk.EventControllerKey()
         key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect("key-pressed", self._on_key_press)
         window.add_controller(key_controller)
 
-        # Add signal handler to update monitor and handle focus when window becomes visible
         window.connect("notify::visible", self._on_visibility_changed)
 
         return window
 
     def _on_search_changed(self):
-        """Handle search entry text changes."""
-        query = self.search_entry.text
-
-        if query and query.strip():
-            # Filter using Ignis built-in search
-            self.filtered_apps = self.apps_service.search(
-                self.all_apps,
-                query
-            )
-        else:
-            # Show default top apps
-            self.filtered_apps = self.all_apps[:20]
-
-        # Reset keyboard selection when search changes
+        """Route query through handlers and update results."""
+        query = self.search_entry.text if self.search_entry else ""
+        self.current_handler, self.current_results = self.router.route(query)
         self.selected_index = -1
         self._update_results()
 
     def _update_results(self):
-        """Rebuild results list from filtered apps."""
-        # Clear existing (GTK4 way)
-        child = self.results_box.get_first_child()
-        while child:
-            next_child = child.get_next_sibling()
-            self.results_box.remove(child)
-            child = next_child
-
-        # Reset button tracking
+        """Rebuild results list from current ResultItem list."""
+        clear_container(self.results_box)
         self.result_buttons = []
 
-        # Add result buttons
-        for app in self.filtered_apps[:30]:  # Max 30 results
-            button = self._create_result_button(app)
-            self.results_box.append(button)
-            self.result_buttons.append(button)
+        for result in self.current_results:
+            if result.widget_builder:
+                # Custom widget (controls, calculator display, etc.)
+                widget = result.widget_builder()
+                self.results_box.append(widget)
+                self.result_buttons.append(widget)
+            else:
+                button = self._create_result_button(result)
+                self.results_box.append(button)
+                self.result_buttons.append(button)
 
-        # Auto-select first result if results exist
         if self.result_buttons:
             self.selected_index = 0
         else:
             self.selected_index = -1
 
-        # Apply selection highlight if index is valid
         self._update_selection_highlight()
 
-    def _create_result_button(self, app):
+    def _create_result_button(self, result: ResultItem):
         """
-        Create a button for a search result with center-aligned layout.
+        Create a button for a search result.
 
-        Args:
-            app: Application object
-
-        Returns:
-            widgets.Button with icon and label
+        Renders differently based on result_type:
+        - "app": icon + name + description (center-aligned)
+        - others: icon + title + description (center-aligned)
         """
         button = widgets.Button(
-            can_focus=False,  # Buttons don't need focus - selection is CSS-only
-            css_classes=["app-item", "result-item"],
+            can_focus=False,
+            css_classes=["app-item", "result-item", f"result-{result.result_type}"],
             child=widgets.Box(
-                halign="center",  # Center entire entry
+                halign="center",
                 child=[
-                    # Vertical stack: [Icon+Name] above [Description]
                     widgets.Box(
                         vertical=True,
                         spacing=4,
                         child=[
-                            # Icon and app name on same line
                             widgets.Box(
                                 spacing=8,
                                 halign="center",
                                 valign="center",
                                 child=[
                                     widgets.Icon(
-                                        image=app.icon,
+                                        image=result.icon,
                                         pixel_size=24,
                                         css_classes=["app-icon"],
                                     ),
                                     widgets.Label(
-                                        label=app.name,
+                                        label=result.title,
                                         css_classes=["app-name", "search-app-name"],
                                         ellipsize="end",
                                         max_width_chars=35,
                                     ),
                                 ],
                             ),
-                            # Description on its own line below
                             widgets.Label(
-                                label=app.description or "",
+                                label=result.description,
                                 css_classes=["app-description", "search-app-description"],
                                 halign="center",
                                 xalign=0.5,
@@ -226,178 +231,118 @@ class SearchPanel:
             ),
         )
 
-        # Left-click to launch
+        # Left-click: activate result
         gesture_left = Gtk.GestureClick()
-        gesture_left.set_button(1)  # Left click
-        gesture_left.connect("pressed", lambda g, n, x, y, app=app: self._on_app_click(app))
+        gesture_left.set_button(1)
+        gesture_left.connect("pressed", lambda g, n, x, y, r=result: self._activate_result(r))
         button.add_controller(gesture_left)
 
-        # Right-click to add to bookmarks (pass button for visual feedback)
-        gesture_right = Gtk.GestureClick()
-        gesture_right.set_button(3)  # Right click
-        gesture_right.connect("pressed", lambda g, n, x, y, app=app, btn=button: self._on_right_click(app, btn))
-        button.add_controller(gesture_right)
+        # Right-click: add to bookmarks (only for app results)
+        if result.result_type == "app" and result.app:
+            gesture_right = Gtk.GestureClick()
+            gesture_right.set_button(3)
+            gesture_right.connect(
+                "pressed",
+                lambda g, n, x, y, r=result, btn=button: add_bookmark_with_refresh(r.app.id, btn)
+            )
+            button.add_controller(gesture_right)
 
         return button
 
-    def _on_app_click(self, app):
-        """Launch app when clicked."""
-        from utils.helpers import load_settings
-        settings = load_settings()
-        close_delay = settings["launcher"]["close_delay_ms"]
-        launch_app(app, self.frecency, close_delay)
-
-    def _on_right_click(self, app, button):
-        """Add app to bookmarks with visual feedback and seamless panel refresh."""
-        if not is_bookmarked(app.id):
-            # Add bookmark to file
-            add_bookmark(app.id)
-
-            # Visual feedback: Add pulse animation CSS class
-            button.add_css_class("bookmark-added")
-
-            # Remove the CSS class after animation completes (300ms)
-            GLib.timeout_add(300, lambda: button.remove_css_class("bookmark-added"))
-
-            print(f"Added {app.name} to bookmarks")
-
-            # Directly refresh bookmarks panel (no flicker!)
-            from ignis.app import IgnisApp
-            app_instance = IgnisApp.get_default()
-            bookmarks_window = app_instance.get_window("ignomi-bookmarks")
-            if bookmarks_window and hasattr(bookmarks_window, 'panel'):
-                # Call refresh method directly - seamless update
-                bookmarks_window.panel.refresh_from_disk()
+    def _activate_result(self, result: ResultItem):
+        """Activate a result item — launch app or call custom handler."""
+        if result.on_activate:
+            result.on_activate()
+        elif result.app:
+            close_delay = self.settings["launcher"]["close_delay_ms"]
+            launch_app(result.app, self.frecency, close_delay)
 
     def _on_visibility_changed(self, window, param):
         """Handle visibility changes - clear search on close, grab focus on open."""
         if window.get_visible():
-            # Window is being shown - update to monitor under cursor
-            cursor_monitor = get_monitor_under_cursor()
-            if window.monitor != cursor_monitor:
-                window.monitor = cursor_monitor
+            update_window_monitor(window)
 
-            # Auto-select first result when opening
             if self.result_buttons:
                 self.selected_index = 0
                 self._update_selection_highlight()
 
-            # Grab focus with delay to allow animation to complete
-            # Window animates into position, so we need to wait for it to settle
-            # before calculating and moving cursor to search entry
-            self._focus_retry_count = 0
-            GLib.timeout_add(300, self._grab_entry_focus)  # 300ms for animation
+            GLib.timeout_add(300, self._grab_entry_focus)
         else:
-            # Window is being hidden - clear search term for fresh start next time
             self.search_entry.set_text("")
-            self.selected_index = -1  # Reset keyboard selection
+            self.selected_index = -1
 
     def _grab_entry_focus(self):
         """
         Move cursor to search entry to ensure focus.
 
-        Instead of trying to grab focus programmatically (unreliable with layer-shell),
-        we physically move the cursor to the search entry position.
+        Uses HyprlandService IPC instead of subprocess calls.
         """
-        import subprocess
-        import json
+        from ignis.services.hyprland import HyprlandService
 
         try:
-            # Get current monitor info to calculate window position
-            cursor_monitor_hyprland = get_monitor_under_cursor()
+            hyprland = HyprlandService.get_default()
+            ignis_monitor_idx = get_monitor_under_cursor()
 
-            # Need to get Hyprland monitor info (with actual coordinates)
-            result = subprocess.run(['hyprctl', 'monitors', '-j'],
-                                  capture_output=True, text=True, timeout=1)
-            if result.returncode == 0:
-                monitors = json.loads(result.stdout)
+            from gi.repository import Gdk as _Gdk
+            display = _Gdk.Display.get_default()
+            if display:
+                gtk_monitors = display.get_monitors()
+                if ignis_monitor_idx < gtk_monitors.get_n_items():
+                    gtk_monitor = gtk_monitors.get_item(ignis_monitor_idx)
+                    connector = gtk_monitor.get_connector()
 
-                # Find the monitor by matching through GTK->Hyprland translation
-                from gi.repository import Gdk
-                display = Gdk.Display.get_default()
-                if display:
-                    gtk_monitors = display.get_monitors()
-                    if cursor_monitor_hyprland < gtk_monitors.get_n_items():
-                        gtk_monitor = gtk_monitors.get_item(cursor_monitor_hyprland)
-                        connector = gtk_monitor.get_connector()
+                    monitor = hyprland.get_monitor_by_name(connector)
+                    if monitor:
+                        window_x = monitor.x + (monitor.width - 600) // 2
+                        window_y = monitor.y + 8
 
-                        # Find matching Hyprland monitor
-                        for monitor in monitors:
-                            if monitor['name'] == connector:
-                                # Calculate search window position
-                                # Window is 600px wide, centered on monitor
-                                monitor_x = monitor['x']
-                                monitor_y = monitor['y']
-                                monitor_width = monitor['width']
+                        entry_x = window_x + 300
+                        entry_y = window_y + 92
 
-                                # Window centered horizontally at top
-                                window_x = monitor_x + (monitor_width - 600) // 2
-                                window_y = monitor_y + 8  # margin from top
+                        hyprland.send_command(
+                            f"dispatch movecursor {entry_x} {entry_y}"
+                        )
 
-                                # Search entry is at top of window
-                                entry_x = window_x + 300  # Center of 600px window horizontally
-                                entry_y = window_y + 92   # Calibrated Y offset for search entry center
-
-                                subprocess.run(['hyprctl', 'dispatch', 'movecursor',
-                                              str(entry_x), str(entry_y)],
-                                             capture_output=True)
-
-                                # Give it a moment, then grab focus
-                                self.search_entry.grab_focus()
-                                break
+                        self.search_entry.grab_focus()
         except Exception:
-            # Fallback to just grabbing focus
             self.search_entry.grab_focus()
 
-        return False  # Don't repeat
+        return False
 
     def _on_entry_activate(self):
-        """Handle Enter key press in search entry - launch selected app."""
-        if 0 <= self.selected_index < len(self.filtered_apps):
-            app = self.filtered_apps[self.selected_index]
-            self._on_app_click(app)
+        """Handle Enter key press — activate selected result."""
+        if 0 <= self.selected_index < len(self.current_results):
+            self._activate_result(self.current_results[self.selected_index])
 
     def _on_key_press(self, controller, keyval, keycode, state):
-        """Handle keyboard events in CAPTURE phase - arrows, Enter, Escape."""
+        """Handle keyboard events in CAPTURE phase."""
         from utils.helpers import close_launcher
 
-        # Escape - close launcher
         if keyval == Gdk.KEY_Escape:
             close_launcher()
             return True
 
-        # Enter - launch selected app (handled here because Entry's activate signal
-        # only fires when Entry has focus, but we keep focus on Entry while navigating)
-        if keyval == Gdk.KEY_Return or keyval == Gdk.KEY_KP_Enter:
-            if 0 <= self.selected_index < len(self.filtered_apps):
-                app = self.filtered_apps[self.selected_index]
-                self._on_app_click(app)
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            if 0 <= self.selected_index < len(self.current_results):
+                self._activate_result(self.current_results[self.selected_index])
                 return True
 
-        # No results - no navigation
         if not self.result_buttons:
             return False
 
-        # Down arrow - move selection down
         if keyval == Gdk.KEY_Down:
             if self.selected_index < len(self.result_buttons) - 1:
                 self.selected_index += 1
                 self._update_selection_highlight()
                 self._scroll_to_selected()
-            # Force focus back to entry
             self.search_entry.grab_focus()
             return True
 
-        # Up arrow - move selection up
         elif keyval == Gdk.KEY_Up:
             if self.selected_index > 0:
                 self.selected_index -= 1
                 self._update_selection_highlight()
                 self._scroll_to_selected()
-            elif self.selected_index == 0:
-                # At top - could move to -1 (no selection) but keeping at 0 is fine
-                pass
-            # Force focus back to entry
             self.search_entry.grab_focus()
             return True
 
@@ -413,11 +358,5 @@ class SearchPanel:
 
     def _scroll_to_selected(self):
         """Scroll to make selected item visible."""
-        if 0 <= self.selected_index < len(self.result_buttons):
-            selected_button = self.result_buttons[self.selected_index]
-            # Request scroll to the button
-            # Note: GTK4 doesn't have a direct "scroll to widget" method
-            # The button will be visible if results box is properly configured
-            # REMOVED: selected_button.grab_focus()
-            # Focus must stay on search entry for Enter key and typing to work.
-            # Visual selection is handled by CSS class "keyboard-selected".
+        # Visual selection is CSS-only; focus stays on search entry
+        pass

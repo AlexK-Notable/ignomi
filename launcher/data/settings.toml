@@ -10,3 +10,15 @@ max_items = 12
 
 # Minimum launches before appearing in frequent panel
 min_launches = 2
+
+[search]
+# Maximum results to display
+max_results = 30
+
+# Fuzzy matching threshold (0-100, higher = stricter)
+# Only used when rapidfuzz is installed: pipx inject ignis rapidfuzz
+fuzzy_threshold = 50
+
+[animation]
+# Transition duration in milliseconds for panel reveal animations
+transition_duration = 200
