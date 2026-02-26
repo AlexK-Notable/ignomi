@@ -6,8 +6,9 @@ Renders Scale and Switch widgets directly in search results using
 Ignis AudioService and BacklightService.
 """
 
+from search.router import ResultItem
+
 from ignis import widgets
-from search.router import SearchHandler, ResultItem
 
 # Audio may not be available without ignis-gvc
 try:
@@ -28,16 +29,11 @@ BRIGHTNESS_KEYWORDS = {"bright", "brightness", "backlight", "screen"}
 MUTE_KEYWORDS = {"mute", "unmute"}
 
 
-class SystemControlsHandler(SearchHandler):
+class SystemControlsHandler:
     """Show inline system controls for volume and brightness."""
 
-    @property
-    def name(self) -> str:
-        return "controls"
-
-    @property
-    def priority(self) -> int:
-        return 50  # Highest priority — check before everything
+    name = "controls"
+    priority = 50  # Highest priority — check before everything
 
     def _audio_available(self) -> bool:
         """Check if audio control is actually usable."""

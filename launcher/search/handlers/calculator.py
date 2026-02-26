@@ -7,26 +7,24 @@ Triggers on "=" prefix. Uses simpleeval for safe expression evaluation
 Install: pipx inject ignis simpleeval
 """
 
+import math
 import subprocess
-from search.router import SearchHandler, ResultItem
+
+from loguru import logger
+from search.router import ResultItem
 
 try:
-    from simpleeval import simple_eval, InvalidExpression
+    from simpleeval import InvalidExpression, simple_eval
     HAS_SIMPLEEVAL = True
 except ImportError:
     HAS_SIMPLEEVAL = False
 
 
-class CalculatorHandler(SearchHandler):
+class CalculatorHandler:
     """Evaluate math expressions prefixed with '='."""
 
-    @property
-    def name(self) -> str:
-        return "calculator"
-
-    @property
-    def priority(self) -> int:
-        return 100
+    name = "calculator"
+    priority = 100
 
     def matches(self, query: str) -> bool:
         if not HAS_SIMPLEEVAL:
@@ -38,13 +36,12 @@ class CalculatorHandler(SearchHandler):
         if not expr:
             return [ResultItem(
                 title="Type an expression",
-                description="e.g. = 2 + 2, = sqrt(16), = 3 * (4 + 5)",
+                description="e.g. = 2 + 2, = sqrt(16), = pi * 2",
                 icon="accessories-calculator",
                 result_type="calculator",
             )]
 
         try:
-            import math
             result = simple_eval(
                 expr,
                 functions={
@@ -56,11 +53,13 @@ class CalculatorHandler(SearchHandler):
                     "tan": math.tan,
                     "log": math.log,
                     "log10": math.log10,
-                    "pi": math.pi,
-                    "e": math.e,
                     "pow": pow,
                     "min": min,
                     "max": max,
+                },
+                names={
+                    "pi": math.pi,
+                    "e": math.e,
                 },
             )
 
@@ -78,9 +77,24 @@ class CalculatorHandler(SearchHandler):
                 on_activate=lambda r=display: self._copy_to_clipboard(r),
             )]
 
-        except (InvalidExpression, Exception) as e:
+        except InvalidExpression:
             return [ResultItem(
                 title="Invalid expression",
+                description=f"Could not evaluate: {expr[:60]}",
+                icon="dialog-error",
+                result_type="calculator",
+            )]
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            return [ResultItem(
+                title="Math error",
+                description=str(e)[:80],
+                icon="dialog-error",
+                result_type="calculator",
+            )]
+        except Exception as e:
+            logger.warning(f"Unexpected calculator error for '{expr}': {e}")
+            return [ResultItem(
+                title="Error",
                 description=str(e)[:80],
                 icon="dialog-error",
                 result_type="calculator",
@@ -95,7 +109,7 @@ class CalculatorHandler(SearchHandler):
                 stderr=subprocess.DEVNULL,
             )
         except FileNotFoundError:
-            pass
+            logger.debug("wl-copy not found, cannot copy to clipboard")
 
         from utils.helpers import close_launcher
         close_launcher()

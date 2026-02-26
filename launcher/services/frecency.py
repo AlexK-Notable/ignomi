@@ -14,12 +14,13 @@ Where recency_weight depends on how recently the app was launched:
 This ensures recently-used apps rank higher than frequently-but-old apps.
 """
 
-from gi.repository import GObject
-from ignis.base_service import BaseService
 import sqlite3
 import time
 from pathlib import Path
-from typing import List, Tuple, Optional
+
+from gi.repository import GObject
+from ignis.base_service import BaseService
+from loguru import logger
 
 
 class FrecencyService(BaseService):
@@ -48,31 +49,33 @@ class FrecencyService(BaseService):
         data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = data_dir / "app_usage.db"
 
-        # Initialize database
+        # Persistent connection with WAL mode for better concurrency
+        self._conn = sqlite3.connect(str(self.db_path))
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._init_database()
+        logger.debug(f"FrecencyService initialized with db at {self.db_path}")
 
     def _init_database(self):
         """Create database schema if it doesn't exist."""
-        with sqlite3.connect(str(self.db_path)) as conn:
-            cursor = conn.cursor()
+        cursor = self._conn.cursor()
 
-            # Create app_stats table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS app_stats (
-                    app_id TEXT PRIMARY KEY,
-                    launch_count INTEGER DEFAULT 0,
-                    last_launch INTEGER,
-                    created_at INTEGER
-                )
-            """)
+        # Create app_stats table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS app_stats (
+                app_id TEXT PRIMARY KEY,
+                launch_count INTEGER DEFAULT 0,
+                last_launch INTEGER,
+                created_at INTEGER
+            )
+        """)
 
-            # Create index for faster frecency queries
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_frecency
-                ON app_stats(last_launch DESC, launch_count DESC)
-            """)
+        # Create index for faster frecency queries
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_frecency
+            ON app_stats(last_launch DESC, launch_count DESC)
+        """)
 
-            conn.commit()
+        self._conn.commit()
 
     def record_launch(self, app_id: str) -> None:
         """
@@ -86,8 +89,8 @@ class FrecencyService(BaseService):
         """
         now = int(time.time())
 
-        with sqlite3.connect(str(self.db_path)) as conn:
-            cursor = conn.cursor()
+        try:
+            cursor = self._conn.cursor()
 
             # Insert new entry or update existing
             cursor.execute("""
@@ -98,12 +101,17 @@ class FrecencyService(BaseService):
                     last_launch = excluded.last_launch
             """, (app_id, now, now))
 
-            conn.commit()
+            self._conn.commit()
+
+            logger.debug(f"Recorded launch for {app_id}")
+        except sqlite3.Error:
+            logger.exception(f"Failed to record launch for {app_id}")
+            return
 
         # Notify listeners (frequent panel will refresh)
         self.emit("changed")
 
-    def get_top_apps(self, limit: int = 12, min_launches: int = 1) -> List[Tuple[str, float, int, int]]:
+    def get_top_apps(self, limit: int = 12, min_launches: int = 1) -> list[tuple[str, float, int, int]]:
         """
         Get top applications ranked by frecency score.
 
@@ -115,30 +123,29 @@ class FrecencyService(BaseService):
             List of tuples: (app_id, frecency_score, launch_count, last_launch)
             Sorted by frecency_score descending
         """
-        with sqlite3.connect(str(self.db_path)) as conn:
-            cursor = conn.cursor()
+        cursor = self._conn.cursor()
 
-            # Get all apps meeting minimum launch requirement
-            cursor.execute("""
-                SELECT app_id, launch_count, last_launch
-                FROM app_stats
-                WHERE launch_count >= ?
-                ORDER BY last_launch DESC, launch_count DESC
-            """, (min_launches,))
+        # Get all apps meeting minimum launch requirement
+        cursor.execute("""
+            SELECT app_id, launch_count, last_launch
+            FROM app_stats
+            WHERE launch_count >= ?
+            ORDER BY last_launch DESC, launch_count DESC
+        """, (min_launches,))
 
-            results = []
-            for app_id, launch_count, last_launch in cursor.fetchall():
-                # Calculate frecency score
-                score = self._calculate_frecency(launch_count, last_launch)
-                results.append((app_id, score, launch_count, last_launch))
+        results = []
+        for app_id, launch_count, last_launch in cursor.fetchall():
+            # Calculate frecency score
+            score = self._calculate_frecency(launch_count, last_launch)
+            results.append((app_id, score, launch_count, last_launch))
 
-            # Sort by frecency score (descending)
-            results.sort(key=lambda x: x[1], reverse=True)
+        # Sort by frecency score (descending)
+        results.sort(key=lambda x: x[1], reverse=True)
 
-            # Return top N
-            return results[:limit]
+        # Return top N
+        return results[:limit]
 
-    def get_app_stats(self, app_id: str) -> Optional[Tuple[int, int, int]]:
+    def get_app_stats(self, app_id: str) -> tuple[int, int, int] | None:
         """
         Get statistics for a specific app.
 
@@ -148,16 +155,15 @@ class FrecencyService(BaseService):
         Returns:
             Tuple of (launch_count, last_launch, created_at) or None if not found
         """
-        with sqlite3.connect(str(self.db_path)) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT launch_count, last_launch, created_at
-                FROM app_stats
-                WHERE app_id = ?
-            """, (app_id,))
+        cursor = self._conn.cursor()
+        cursor.execute("""
+            SELECT launch_count, last_launch, created_at
+            FROM app_stats
+            WHERE app_id = ?
+        """, (app_id,))
 
-            row = cursor.fetchone()
-            return row if row else None
+        row = cursor.fetchone()
+        return row if row else None
 
     def _calculate_frecency(self, launch_count: int, last_launch: int) -> float:
         """
@@ -203,13 +209,12 @@ class FrecencyService(BaseService):
         Returns:
             Total launch count across all apps
         """
-        with sqlite3.connect(str(self.db_path)) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT SUM(launch_count) FROM app_stats")
-            result = cursor.fetchone()
-            return result[0] if result[0] else 0
+        cursor = self._conn.cursor()
+        cursor.execute("SELECT SUM(launch_count) FROM app_stats")
+        result = cursor.fetchone()
+        return result[0] if result[0] else 0
 
-    def clear_stats(self, app_id: Optional[str] = None) -> None:
+    def clear_stats(self, app_id: str | None = None) -> None:
         """
         Clear usage statistics.
 
@@ -220,15 +225,18 @@ class FrecencyService(BaseService):
         Emits:
             changed: Signal to notify listeners
         """
-        with sqlite3.connect(str(self.db_path)) as conn:
-            cursor = conn.cursor()
+        try:
+            cursor = self._conn.cursor()
 
             if app_id:
                 cursor.execute("DELETE FROM app_stats WHERE app_id = ?", (app_id,))
             else:
                 cursor.execute("DELETE FROM app_stats")
 
-            conn.commit()
+            self._conn.commit()
+        except sqlite3.Error:
+            logger.exception(f"Failed to clear stats for {app_id or 'all apps'}")
+            return
 
         self.emit("changed")
 

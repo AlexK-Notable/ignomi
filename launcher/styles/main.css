@@ -31,6 +31,12 @@ window.ignomi-window.background,
     background-color: transparent;
 }
 
+/* Full-screen backdrop — neutral gray at minimum alpha for blur trigger.
+   Compositor needs non-zero alpha; gray is perceptually neutral. */
+.ignomi-backdrop-fill {
+    background-color: rgba(128, 128, 128, 0.01);
+}
+
 /* Panel containers */
 .panel {
     background-color: @bg_65;
@@ -61,7 +67,7 @@ window.ignomi-window.background,
     border-radius: 8px;
     padding: 12px;
     margin: 2px 0;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, transform 0.15s ease;
 }
 
 .app-item:hover {
@@ -128,7 +134,7 @@ window.ignomi-window.background,
     background-color: @bg_60;
     color: @fg;
     border: 1px solid @color4_40;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .search-entry:focus {
@@ -137,16 +143,22 @@ window.ignomi-window.background,
     box-shadow: 0 0 8px @color6_30;
 }
 
-.search-results {
-    /* Size controlled by ScrolledWindow in Python */
+/* Override GTK4 theme default 'list' background */
+.search-results,
+.search-results list {
+    background-color: transparent;
+}
+
+.search-results row {
+    background-color: transparent;
 }
 
 .result-item {
     padding: 10px 12px;
 }
 
-/* Keyboard navigation highlight */
-.keyboard-selected {
+/* Keyboard navigation highlight (ListBox selection) */
+.search-results row:selected {
     background-color: @color6_40;
     border-left: 3px solid @color6;
 }

@@ -1,0 +1,24 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["launcher"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+include = ["launcher/**/*.py"]
+
+[tool.ruff.lint]
+select = [
+    "F",   # pyflakes
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E402",  # module level import not at top (required for sys.path manipulation)
+    "E501",  # line too long
+]
+fixable = ["ALL"]
+unfixable = []

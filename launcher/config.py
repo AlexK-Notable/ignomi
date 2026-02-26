@@ -11,18 +11,32 @@ Usage:
   ignis open-window ignomi-frequent   # Open frequent panel only
 """
 
-from ignis.app import IgnisApp
-import sys
 import os
+import sys
+from pathlib import Path
+
+from ignis.app import IgnisApp
+from loguru import logger
+
+# Configure logging: file + stderr
+logger.remove()  # Remove default stderr handler
+logger.add(sys.stderr, level="WARNING")
+logger.add(
+    Path.home() / ".local" / "share" / "ignomi" / "ignomi.log",
+    rotation="1 MB",
+    retention=3,
+    level="DEBUG",
+)
 
 # Add launcher to path dynamically (works from any location/worktree)
 # Resolve symlink to get the actual launcher directory
 config_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, config_dir)
 
+from panels.backdrop import create_backdrop_window
 from panels.bookmarks import BookmarksPanel
-from panels.search import SearchPanel
 from panels.frequent import FrequentPanel
+from panels.search import SearchPanel
 
 # Get Ignis app instance
 app = IgnisApp.get_default()
@@ -34,12 +48,15 @@ styles_dir = os.path.join(config_dir, "styles")
 try:
     app.apply_css(os.path.join(styles_dir, "colors.css"), style_priority="user")
 except Exception as e:
-    print(f"Warning: Could not load colors.css: {e}")
+    logger.warning(f"Could not load colors.css: {e}")
 
 try:
     app.apply_css(os.path.join(styles_dir, "main.css"), style_priority="user")
 except Exception as e:
-    print(f"Warning: Could not load main.css: {e}")
+    logger.warning(f"Could not load main.css: {e}")
+
+# Create backdrop (full-screen blur overlay)
+backdrop_window = create_backdrop_window()
 
 # Create panels
 bookmarks_panel = BookmarksPanel()
@@ -56,5 +73,4 @@ bookmarks_window.panel = bookmarks_panel
 search_window.panel = search_panel
 frequent_window.panel = frequent_panel
 
-print("Ignomi launcher initialized successfully")
-print("Press Mod+Space to open launcher")
+logger.info("Ignomi launcher initialized successfully")

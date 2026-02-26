@@ -9,21 +9,29 @@ Features:
 - Auto-saves changes
 """
 
-from ignis import widgets
-from ignis.services.applications import ApplicationsService
-from ignis.menu_model import IgnisMenuModel, IgnisMenuItem
-from gi.repository import Gtk, Gdk, GObject
-import sys
 import os
+import sys
+
+from gi.repository import Gdk, GObject, Gtk
+from ignis.menu_model import IgnisMenuItem, IgnisMenuModel
+from ignis.services.applications import ApplicationsService
+
+from ignis import widgets
+
 # Add launcher directory to path dynamically (works from any location/worktree)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.helpers import (
-    load_bookmarks, save_bookmarks, launch_app, remove_bookmark,
-    get_monitor_under_cursor, clear_container, find_app_by_id,
-    update_window_monitor, load_settings,
-)
 from services.frecency import get_frecency_service
+from utils.helpers import (
+    clear_container,
+    find_app_by_id,
+    get_monitor_under_cursor,
+    launch_app,
+    load_bookmarks,
+    load_settings,
+    save_bookmarks,
+    update_window_monitor,
+)
 
 
 class BookmarksPanel:
@@ -48,10 +56,14 @@ class BookmarksPanel:
 
     def create_window(self):
         """
-        Create the bookmarks panel window with slide animation.
+        Create the bookmarks panel window.
+
+        Animations are handled by Hyprland compositor layerrules,
+        not by GTK Revealer. Using plain Window avoids the dual-animation
+        conflict that caused visual artifacts.
 
         Returns:
-            widgets.RevealerWindow positioned on left edge
+            widgets.Window positioned on left edge
         """
         # Create scrollable app list
         self.app_list_box = widgets.Box(
@@ -89,33 +101,20 @@ class BookmarksPanel:
             ]
         )
 
-        # Revealer for slide-in animation (from left)
-        anim_duration = self.settings.get("animation", {}).get("transition_duration", 200)
-        revealer = widgets.Revealer(
-            transition_type="slide_right",
-            transition_duration=anim_duration,
-            reveal_child=True,
-            child=content,
-        )
-
-        # Box wrapper required by RevealerWindow
-        revealer_box = widgets.Box(child=[revealer])
-
-        window = widgets.RevealerWindow(
-            revealer=revealer,
+        window = widgets.Window(
             namespace="ignomi-bookmarks",
             css_classes=["ignomi-window"],
             monitor=get_monitor_under_cursor(),
             anchor=["left", "top", "bottom"],
-            exclusivity="exclusive",
+            exclusivity="ignore",
             kb_mode="on_demand",
-            layer="top",
+            layer="overlay",
             default_width=320,
             visible=False,
             margin_top=8,
             margin_bottom=8,
             margin_left=8,
-            child=revealer_box,
+            child=content,
         )
 
         window.connect("notify::visible", self._on_visibility_changed)

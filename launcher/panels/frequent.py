@@ -8,21 +8,28 @@ Features:
 - Right-click context menu: remove from frequents, add to bookmarks
 """
 
-from ignis import widgets
-from ignis.services.applications import ApplicationsService
-from ignis.menu_model import IgnisMenuModel, IgnisMenuItem
-from gi.repository import Gtk
-import sys
 import os
+import sys
+
+from gi.repository import Gtk
+from ignis.menu_model import IgnisMenuItem, IgnisMenuModel
+from ignis.services.applications import ApplicationsService
+
+from ignis import widgets
+
 # Add launcher directory to path dynamically (works from any location/worktree)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from services.frecency import get_frecency_service
 from utils.helpers import (
-    launch_app, load_settings, get_monitor_under_cursor,
-    clear_container, find_app_by_id, add_bookmark_with_refresh,
+    add_bookmark_with_refresh,
+    clear_container,
+    find_app_by_id,
+    get_monitor_under_cursor,
+    launch_app,
+    load_settings,
     update_window_monitor,
 )
-from services.frecency import get_frecency_service
 
 
 class FrequentPanel:
@@ -63,7 +70,7 @@ class FrequentPanel:
         )
 
         apps = []
-        for app_id, score, count, last_launch in top_data:
+        for app_id, score, count, _last_launch in top_data:
             app = find_app_by_id(app_id)
             if app:
                 apps.append((app, score, count))
@@ -72,10 +79,14 @@ class FrequentPanel:
 
     def create_window(self):
         """
-        Create the frequent apps panel window with slide animation.
+        Create the frequent apps panel window.
+
+        Animations are handled by Hyprland compositor layerrules,
+        not by GTK Revealer. Using plain Window avoids the dual-animation
+        conflict that caused visual artifacts.
 
         Returns:
-            widgets.RevealerWindow positioned on right edge
+            widgets.Window positioned on right edge
         """
         # Create app list container
         self.app_list_box = widgets.Box(
@@ -113,33 +124,20 @@ class FrequentPanel:
             ]
         )
 
-        # Revealer for slide-in animation (from right)
-        anim_duration = self.settings.get("animation", {}).get("transition_duration", 200)
-        revealer = widgets.Revealer(
-            transition_type="slide_left",
-            transition_duration=anim_duration,
-            reveal_child=True,
-            child=content,
-        )
-
-        # Box wrapper required by RevealerWindow
-        revealer_box = widgets.Box(child=[revealer])
-
-        window = widgets.RevealerWindow(
-            revealer=revealer,
+        window = widgets.Window(
             namespace="ignomi-frequent",
             css_classes=["ignomi-window"],
             monitor=get_monitor_under_cursor(),
             anchor=["right", "top", "bottom"],
-            exclusivity="exclusive",
+            exclusivity="ignore",
             kb_mode="on_demand",
-            layer="top",
+            layer="overlay",
             default_width=320,
             visible=False,
             margin_top=8,
             margin_bottom=8,
             margin_right=8,
-            child=revealer_box,
+            child=content,
         )
 
         window.connect("notify::visible", self._on_visibility_changed)
@@ -157,7 +155,7 @@ class FrequentPanel:
 
         # Add frequent app buttons
         if self.top_apps:
-            for app, score, count in self.top_apps:
+            for app, _score, count in self.top_apps:
                 button = self._create_app_button(app, count)
                 self.app_list_box.append(button)
         else:

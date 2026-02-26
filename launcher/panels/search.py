@@ -3,29 +3,39 @@ Search Panel - Center panel with search entry and filtered results.
 
 Features:
 - Query router dispatches to typed handlers (app search, calculator, etc.)
-- Real-time filtering with keyboard navigation
+- Real-time filtering with debounced input
+- Keyboard navigation with scroll-to-selected
 - Right-click to add apps to bookmarks
 - Auto-focus search field when launcher opens
-- Clear search term when launcher closes
+- Clear search term when launcher closes (with close guard)
 """
 
-from ignis import widgets
-from ignis.services.applications import ApplicationsService
-from gi.repository import Gtk, GLib, Gdk
-import sys
 import os
+import sys
+
+from gi.repository import Gdk, GLib, Gtk
+from ignis.services.applications import ApplicationsService
+
+from ignis import widgets
+
 # Add launcher directory to path dynamically (works from any location/worktree)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.helpers import (
-    launch_app, get_monitor_under_cursor, load_settings,
-    clear_container, add_bookmark_with_refresh, update_window_monitor,
-)
-from services.frecency import get_frecency_service
-from search.router import QueryRouter, ResultItem
 from search.handlers import (
-    AppSearchHandler, CalculatorHandler,
-    SystemControlsHandler, WebSearchHandler, CustomCommandsHandler,
+    AppSearchHandler,
+    CalculatorHandler,
+    CustomCommandsHandler,
+    SystemControlsHandler,
+    WebSearchHandler,
+)
+from search.router import QueryRouter, ResultItem
+from services.frecency import get_frecency_service
+from utils.helpers import (
+    add_bookmark_with_refresh,
+    get_monitor_under_cursor,
+    launch_app,
+    load_settings,
+    update_window_monitor,
 )
 
 
@@ -61,17 +71,24 @@ class SearchPanel:
         # Widgets (created in create_window)
         self.search_entry = None
         self.results_box = None
+        self._revealer = None
 
-        # Keyboard navigation
-        self.selected_index = -1
-        self.result_buttons = []
+        # Debounce and close guard
+        self._debounce_timer = None
+        self._closing = False
 
     def create_window(self):
         """
-        Create the search panel window with slide animation.
+        Create the search panel window.
+
+        The search panel uses a GTK Revealer for open/close animation
+        (crossfade). Edge-anchored panels (bookmarks, frequent) use
+        Hyprland layerrules, but the centered search panel drifts
+        laterally with compositor slide animations — GTK Revealer
+        gives us full control.
 
         Returns:
-            widgets.RevealerWindow positioned at top center
+            widgets.Window positioned at top center
         """
         self.search_entry = widgets.Entry(
             placeholder_text="Search applications...",
@@ -82,63 +99,58 @@ class SearchPanel:
 
         self.search_entry.connect("activate", lambda entry: self._on_entry_activate())
 
-        self.results_box = widgets.Box(
-            vertical=True,
-            spacing=2,
-            css_classes=["search-results"]
+        self.results_box = widgets.ListBox(
+            css_classes=["search-results"],
         )
 
         # Initial population
-        self._on_search_changed()
+        self._do_search()
 
-        # Panel content
-        content = widgets.Box(
+        # Panel content (no vexpand/valign — Revealer controls sizing)
+        panel_content = widgets.Box(
             vertical=True,
-            vexpand=True,
-            valign="center",
+            css_classes=["panel", "search-panel"],
             child=[
-                widgets.Box(
-                    vertical=True,
-                    css_classes=["panel", "search-panel"],
-                    child=[
-                        self.search_entry,
-                        widgets.Scroll(
-                            hexpand=True,
-                            max_content_height=500,
-                            propagate_natural_height=True,
-                            child=self.results_box
-                        )
-                    ]
+                self.search_entry,
+                widgets.Scroll(
+                    hexpand=True,
+                    max_content_height=500,
+                    propagate_natural_height=True,
+                    child=self.results_box
                 )
             ]
         )
 
-        # Revealer for slide-down animation
-        anim_duration = self.settings.get("animation", {}).get("transition_duration", 200)
-        revealer = widgets.Revealer(
-            transition_type="slide_down",
-            transition_duration=anim_duration,
-            reveal_child=True,
-            child=content,
+        # Revealer nested INSIDE the centering box so it clips within
+        # the content's own height, not the full window height.
+        self._revealer = widgets.Revealer(
+            transition_type="crossfade",
+            transition_duration=200,
+            reveal_child=False,
+            child=panel_content,
         )
 
-        # Box wrapper required by RevealerWindow
-        revealer_box = widgets.Box(child=[revealer])
+        # Centering wrapper — stays centered regardless of Revealer state
+        centered = widgets.Box(
+            vertical=True,
+            vexpand=True,
+            valign="center",
+            child=[self._revealer],
+        )
 
-        window = widgets.RevealerWindow(
-            revealer=revealer,
+        window = widgets.Window(
             namespace="ignomi-search",
             css_classes=["ignomi-window"],
             monitor=get_monitor_under_cursor(),
             anchor=["top", "bottom"],
-            exclusivity="normal",
-            kb_mode="on_demand",
-            layer="top",
             default_width=600,
+            exclusivity="ignore",
+            kb_mode="on_demand",
+            layer="overlay",
             visible=False,
             margin_top=8,
             margin_bottom=8,
-            child=revealer_box,
+            child=centered,
         )
 
         # Keyboard controller in CAPTURE phase to intercept arrows
@@ -149,48 +161,54 @@ class SearchPanel:
 
         window.connect("notify::visible", self._on_visibility_changed)
 
+        # Hide window the instant revealer animation completes (no lingering tail)
+        self._revealer.connect("notify::child-revealed", self._on_child_revealed)
+
         return window
 
+    def _on_child_revealed(self, revealer, param):
+        """Hide window immediately when unreveal animation finishes."""
+        if not revealer.get_child_revealed():
+            window = revealer.get_root()
+            if window:
+                window.set_visible(False)
+
     def _on_search_changed(self):
-        """Route query through handlers and update results."""
+        """Debounced search — waits 120ms after last keystroke."""
+        if self._closing:
+            return
+        if self._debounce_timer is not None:
+            GLib.source_remove(self._debounce_timer)
+        self._debounce_timer = GLib.timeout_add(120, self._do_search)
+
+    def _do_search(self):
+        """Execute the actual search query (called after debounce)."""
+        self._debounce_timer = None
         query = self.search_entry.text if self.search_entry else ""
         self.current_handler, self.current_results = self.router.route(query)
-        self.selected_index = -1
         self._update_results()
+        return False  # Don't repeat GLib timeout
 
     def _update_results(self):
         """Rebuild results list from current ResultItem list."""
-        clear_container(self.results_box)
-        self.result_buttons = []
+        self.results_box.remove_all()
 
         for result in self.current_results:
             if result.widget_builder:
-                # Custom widget (controls, calculator display, etc.)
                 widget = result.widget_builder()
-                self.results_box.append(widget)
-                self.result_buttons.append(widget)
+                row = widgets.ListBoxRow(child=widget)
+                self.results_box.append(row)
             else:
-                button = self._create_result_button(result)
-                self.results_box.append(button)
-                self.result_buttons.append(button)
+                row = self._create_result_row(result)
+                self.results_box.append(row)
 
-        if self.result_buttons:
-            self.selected_index = 0
-        else:
-            self.selected_index = -1
+        rows = self.results_box.rows
+        if rows:
+            self.results_box.select_row(rows[0])
 
-        self._update_selection_highlight()
-
-    def _create_result_button(self, result: ResultItem):
-        """
-        Create a button for a search result.
-
-        Renders differently based on result_type:
-        - "app": icon + name + description (center-aligned)
-        - others: icon + title + description (center-aligned)
-        """
-        button = widgets.Button(
-            can_focus=False,
+    def _create_result_row(self, result: ResultItem):
+        """Create a ListBoxRow for a search result."""
+        row = widgets.ListBoxRow(
             css_classes=["app-item", "result-item", f"result-{result.result_type}"],
             child=widgets.Box(
                 halign="center",
@@ -229,13 +247,8 @@ class SearchPanel:
                     )
                 ],
             ),
+            on_activate=lambda r, result=result: self._activate_result(result),
         )
-
-        # Left-click: activate result
-        gesture_left = Gtk.GestureClick()
-        gesture_left.set_button(1)
-        gesture_left.connect("pressed", lambda g, n, x, y, r=result: self._activate_result(r))
-        button.add_controller(gesture_left)
 
         # Right-click: add to bookmarks (only for app results)
         if result.result_type == "app" and result.app:
@@ -243,11 +256,11 @@ class SearchPanel:
             gesture_right.set_button(3)
             gesture_right.connect(
                 "pressed",
-                lambda g, n, x, y, r=result, btn=button: add_bookmark_with_refresh(r.app.id, btn)
+                lambda g, n, x, y, r=result, rw=row: add_bookmark_with_refresh(r.app.id, rw)
             )
-            button.add_controller(gesture_right)
+            row.add_controller(gesture_right)
 
-        return button
+        return row
 
     def _activate_result(self, result: ResultItem):
         """Activate a result item — launch app or call custom handler."""
@@ -257,19 +270,28 @@ class SearchPanel:
             close_delay = self.settings["launcher"]["close_delay_ms"]
             launch_app(result.app, self.frecency, close_delay)
 
+    PANEL_WIDTH = 600
+
     def _on_visibility_changed(self, window, param):
-        """Handle visibility changes - clear search on close, grab focus on open."""
+        """Handle visibility changes — reveal on open, clear on close."""
         if window.get_visible():
             update_window_monitor(window)
 
-            if self.result_buttons:
-                self.selected_index = 0
-                self._update_selection_highlight()
+            # Reveal content with crossfade animation
+            self._revealer.set_reveal_child(True)
+
+            rows = self.results_box.rows
+            if rows:
+                self.results_box.select_row(rows[0])
 
             GLib.timeout_add(300, self._grab_entry_focus)
         else:
+            # Close guard: prevent set_text("") from triggering a new search
+            self._closing = True
             self.search_entry.set_text("")
-            self.selected_index = -1
+            self._closing = False
+            # Reset revealer for next open (window is already hidden)
+            self._revealer.set_reveal_child(False)
 
     def _grab_entry_focus(self):
         """
@@ -277,33 +299,27 @@ class SearchPanel:
 
         Uses HyprlandService IPC instead of subprocess calls.
         """
-        from ignis.services.hyprland import HyprlandService
-
         try:
+            from ignis.services.hyprland import HyprlandService
+            from gi.repository import Gdk as _Gdk
+
             hyprland = HyprlandService.get_default()
             ignis_monitor_idx = get_monitor_under_cursor()
-
-            from gi.repository import Gdk as _Gdk
             display = _Gdk.Display.get_default()
             if display:
                 gtk_monitors = display.get_monitors()
                 if ignis_monitor_idx < gtk_monitors.get_n_items():
-                    gtk_monitor = gtk_monitors.get_item(ignis_monitor_idx)
-                    connector = gtk_monitor.get_connector()
-
+                    connector = gtk_monitors.get_item(ignis_monitor_idx).get_connector()
                     monitor = hyprland.get_monitor_by_name(connector)
                     if monitor:
-                        window_x = monitor.x + (monitor.width - 600) // 2
-                        window_y = monitor.y + 8
-
-                        entry_x = window_x + 300
-                        entry_y = window_y + 92
+                        entry_x = monitor.x + (monitor.width // 2)
+                        entry_y = monitor.y + 100
 
                         hyprland.send_command(
                             f"dispatch movecursor {entry_x} {entry_y}"
                         )
 
-                        self.search_entry.grab_focus()
+            self.search_entry.grab_focus()
         except Exception:
             self.search_entry.grab_focus()
 
@@ -311,8 +327,9 @@ class SearchPanel:
 
     def _on_entry_activate(self):
         """Handle Enter key press — activate selected result."""
-        if 0 <= self.selected_index < len(self.current_results):
-            self._activate_result(self.current_results[self.selected_index])
+        selected = self.results_box.get_selected_row()
+        if selected:
+            self.results_box.activate_row(selected)
 
     def _on_key_press(self, controller, keyval, keycode, state):
         """Handle keyboard events in CAPTURE phase."""
@@ -323,40 +340,38 @@ class SearchPanel:
             return True
 
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            if 0 <= self.selected_index < len(self.current_results):
-                self._activate_result(self.current_results[self.selected_index])
-                return True
+            selected = self.results_box.get_selected_row()
+            if selected:
+                self.results_box.activate_row(selected)
+            return True
 
-        if not self.result_buttons:
+        rows = self.results_box.rows
+        if not rows:
             return False
 
+        selected = self.results_box.get_selected_row()
+        current_idx = selected.get_index() if selected else -1
+
         if keyval == Gdk.KEY_Down:
-            if self.selected_index < len(self.result_buttons) - 1:
-                self.selected_index += 1
-                self._update_selection_highlight()
-                self._scroll_to_selected()
+            if current_idx < len(rows) - 1:
+                self.results_box.select_row(rows[current_idx + 1])
+                self._ensure_visible()
             self.search_entry.grab_focus()
             return True
 
         elif keyval == Gdk.KEY_Up:
-            if self.selected_index > 0:
-                self.selected_index -= 1
-                self._update_selection_highlight()
-                self._scroll_to_selected()
+            if current_idx > 0:
+                self.results_box.select_row(rows[current_idx - 1])
+                self._ensure_visible()
             self.search_entry.grab_focus()
             return True
 
         return False
 
-    def _update_selection_highlight(self):
-        """Update visual highlight for keyboard navigation."""
-        for i, button in enumerate(self.result_buttons):
-            if i == self.selected_index:
-                button.add_css_class("keyboard-selected")
-            else:
-                button.remove_css_class("keyboard-selected")
-
-    def _scroll_to_selected(self):
-        """Scroll to make selected item visible."""
-        # Visual selection is CSS-only; focus stays on search entry
-        pass
+    def _ensure_visible(self):
+        """Scroll to make selected row visible by briefly grabbing focus."""
+        selected = self.results_box.get_selected_row()
+        if selected:
+            selected.grab_focus()
+            if self.search_entry:
+                self.search_entry.grab_focus()

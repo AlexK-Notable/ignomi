@@ -6,9 +6,9 @@ method. The router finds the first matching handler and returns its results.
 App search is always the fallback (highest priority number).
 """
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Optional, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Protocol
 
 
 @dataclass
@@ -18,35 +18,18 @@ class ResultItem:
     description: str = ""
     icon: str = "image-missing"
     result_type: str = "app"  # app, calculator, control, web, command
-    on_activate: Optional[Callable] = None
-    widget_builder: Optional[Callable] = None
+    on_activate: Callable | None = None
+    widget_builder: Callable | None = None
     app: object = None  # Application object for app results
 
 
-class SearchHandler(ABC):
-    """Base class for all search handlers."""
+class SearchHandler(Protocol):
+    """Structural type for search handlers. No inheritance required."""
+    name: str
+    priority: int
 
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Handler identifier."""
-        ...
-
-    @property
-    @abstractmethod
-    def priority(self) -> int:
-        """Lower number = checked first. App search should be ~1000."""
-        ...
-
-    @abstractmethod
-    def matches(self, query: str) -> bool:
-        """Return True if this handler should process the query."""
-        ...
-
-    @abstractmethod
-    def get_results(self, query: str) -> list[ResultItem]:
-        """Return results for the query."""
-        ...
+    def matches(self, query: str) -> bool: ...
+    def get_results(self, query: str) -> list[ResultItem]: ...
 
 
 class QueryRouter:

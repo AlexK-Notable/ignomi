@@ -8,7 +8,7 @@ Install fuzzy search: pipx inject ignis rapidfuzz
 """
 
 from ignis.services.applications import ApplicationsService
-from search.router import SearchHandler, ResultItem
+from search.router import ResultItem
 
 try:
     from rapidfuzz import fuzz, process
@@ -17,21 +17,16 @@ except ImportError:
     HAS_RAPIDFUZZ = False
 
 
-class AppSearchHandler(SearchHandler):
+class AppSearchHandler:
     """Search installed applications with optional fuzzy matching."""
+
+    name = "app_search"
+    priority = 1000
 
     def __init__(self, max_results: int = 30, fuzzy_threshold: int = 50):
         self.apps_service = ApplicationsService.get_default()
         self.max_results = max_results
         self.fuzzy_threshold = fuzzy_threshold
-
-    @property
-    def name(self) -> str:
-        return "app_search"
-
-    @property
-    def priority(self) -> int:
-        return 1000
 
     def matches(self, query: str) -> bool:
         return True
@@ -63,7 +58,7 @@ class AppSearchHandler(SearchHandler):
 
         # matches: list of (matched_string, score, key)
         results = []
-        for matched_str, score, app_id in matches:
+        for _matched_str, _score, app_id in matches:
             app = self._find_app(app_id, all_apps)
             if app:
                 results.append(ResultItem(

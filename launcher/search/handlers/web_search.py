@@ -13,8 +13,9 @@ Search engines are configurable via settings.toml [web_search] section.
 
 import subprocess
 import urllib.parse
-from search.router import SearchHandler, ResultItem
 
+from loguru import logger
+from search.router import ResultItem
 
 # Default search engine URLs (can be overridden in settings.toml)
 DEFAULT_ENGINES = {
@@ -25,22 +26,15 @@ DEFAULT_ENGINES = {
     "yt:": {"name": "YouTube", "url": "https://www.youtube.com/results?search_query={query}", "icon": "applications-multimedia"},
 }
 
-BROWSER = "firefox"
 
-
-class WebSearchHandler(SearchHandler):
+class WebSearchHandler:
     """Open web search queries in browser."""
+
+    name = "web_search"
+    priority = 200
 
     def __init__(self, engines: dict = None):
         self.engines = engines or DEFAULT_ENGINES
-
-    @property
-    def name(self) -> str:
-        return "web_search"
-
-    @property
-    def priority(self) -> int:
-        return 200
 
     def matches(self, query: str) -> bool:
         q = query.strip()
@@ -80,15 +74,15 @@ class WebSearchHandler(SearchHandler):
         return []
 
     def _open_url(self, url: str):
-        """Open URL in Firefox and close launcher."""
+        """Open URL in default browser via xdg-open and close launcher."""
         try:
             subprocess.Popen(
-                [BROWSER, url],
+                ["xdg-open", url],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
         except FileNotFoundError:
-            pass
+            logger.warning("xdg-open not found, cannot open URL")
 
         from utils.helpers import close_launcher
         close_launcher()

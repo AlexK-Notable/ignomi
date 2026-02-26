@@ -9,14 +9,15 @@ Provides common functions used across multiple panels:
 - Shared UI operations (container clearing, bookmark management)
 """
 
-from gi.repository import GLib, Gdk
-from pathlib import Path
-import toml
 import json
-from typing import Dict, Any, Optional
+from pathlib import Path
+from typing import Any
 
+import toml
+from gi.repository import Gdk, GLib
 from ignis.services.applications import ApplicationsService
 from ignis.services.hyprland import HyprlandService
+from loguru import logger
 
 
 def _hyprland_name_to_ignis_index(connector_name: str) -> int:
@@ -61,6 +62,7 @@ def hyprland_monitor_to_ignis_monitor(hyprland_id: int) -> int:
                 return _hyprland_name_to_ignis_index(monitor.name)
         return 0
     except Exception:
+        logger.debug(f"Failed to convert Hyprland monitor {hyprland_id}")
         return 0
 
 
@@ -91,7 +93,7 @@ def get_monitor_under_cursor() -> int:
                 return _hyprland_name_to_ignis_index(monitor.name)
 
     except Exception:
-        pass
+        logger.debug("Failed to detect monitor under cursor, defaulting to 0")
 
     return 0
 
@@ -178,13 +180,10 @@ def launch_app(app, frecency_service, close_delay_ms: int = 300):
         app: Application object from ApplicationsService
         frecency_service: FrecencyService instance for tracking
         close_delay_ms: Delay in milliseconds before closing launcher
-
-    Example:
-        from utils.helpers import launch_app
-        launch_app(app, frecency_service, 300)
     """
     # Launch the application
     app.launch()
+    logger.debug(f"Launched {app.id}")
 
     # Record in frecency for usage tracking
     frecency_service.record_launch(app.id)
@@ -206,39 +205,55 @@ def _close_launcher_callback() -> bool:
 
 def close_launcher():
     """
-    Close all Ignomi launcher windows.
+    Close all Ignomi launcher windows including backdrop.
 
-    Hides all windows with namespace starting with "ignomi-".
-    This effectively closes the entire launcher.
+    Bookmarks/frequent/backdrop: Hyprland layerrules handle animation.
+    Search panel: GTK Revealer handles crossfade — unreveal first,
+    then hide the window after the animation completes.
     """
     from ignis.app import IgnisApp
 
     app = IgnisApp.get_default()
 
-    # Hide all ignomi windows
     for window in app.get_windows():
         if window.namespace and window.namespace.startswith("ignomi-"):
-            window.set_visible(False)
+            if window.namespace == "ignomi-search":
+                _close_search_panel(window)
+            else:
+                window.set_visible(False)
 
 
-def load_settings() -> Dict[str, Any]:
+def _close_search_panel(window):
+    """Close the search panel with GTK Revealer animation.
+
+    Traverses centering Box → Revealer. The notify::child-revealed
+    signal on the Revealer hides the window when animation finishes.
     """
-    Load launcher settings from TOML file.
+    # Window child is the centering Box; Revealer is its first child
+    centering_box = window.get_child()
+    if centering_box:
+        revealer = centering_box.get_first_child()
+        if revealer and hasattr(revealer, 'set_reveal_child'):
+            revealer.set_reveal_child(False)
+            return
+    window.set_visible(False)
+
+
+# -- Settings cache --
+_settings_cache = None
+
+
+def load_settings() -> dict[str, Any]:
+    """
+    Load launcher settings from TOML file (cached after first load).
 
     Returns:
         Dictionary containing settings with defaults applied
-
-    Example settings structure:
-        {
-            "launcher": {
-                "close_delay_ms": 300
-            },
-            "frecency": {
-                "max_items": 12,
-                "min_launches": 2
-            }
-        }
     """
+    global _settings_cache
+    if _settings_cache is not None:
+        return _settings_cache
+
     # Default settings
     defaults = {
         "launcher": {
@@ -266,17 +281,19 @@ def load_settings() -> Dict[str, Any]:
             loaded = toml.load(settings_path)
             # Merge loaded settings with defaults
             settings = _deep_merge(defaults, loaded)
+            _settings_cache = settings
             return settings
         except Exception as e:
-            print(f"Warning: Could not load settings from {settings_path}: {e}")
-            print("Using default settings")
+            logger.warning(f"Could not load settings from {settings_path}: {e}, using defaults")
+            _settings_cache = defaults
             return defaults
     else:
-        print(f"Info: Settings file not found at {settings_path}, using defaults")
+        logger.info(f"Settings file not found at {settings_path}, using defaults")
+        _settings_cache = defaults
         return defaults
 
 
-def _deep_merge(base: Dict, override: Dict) -> Dict:
+def _deep_merge(base: dict, override: dict) -> dict:
     """
     Deep merge two dictionaries.
 
@@ -298,54 +315,79 @@ def _deep_merge(base: Dict, override: Dict) -> Dict:
     return result
 
 
+# -- Bookmarks --
+_bookmarks_cache = None
+
+
+def _bookmarks_path() -> Path:
+    """Resolve bookmarks file path with XDG migration."""
+    import shutil
+
+    xdg_path = Path.home() / ".local" / "share" / "ignomi" / "bookmarks.json"
+    if xdg_path.exists():
+        return xdg_path
+
+    old_path = Path(__file__).parent.parent / "data" / "bookmarks.json"
+    if old_path.exists():
+        xdg_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(old_path), str(xdg_path))
+        logger.info(f"Migrated bookmarks from {old_path} to {xdg_path}")
+        return xdg_path
+
+    return xdg_path
+
+
 def load_bookmarks() -> list:
     """
-    Load bookmark app IDs from JSON file.
+    Load bookmark app IDs from JSON file (cached after first load).
 
     Returns:
         List of desktop file IDs (e.g., ["firefox.desktop", ...])
 
     If file doesn't exist or is invalid, returns empty list.
     """
-    import json
+    global _bookmarks_cache
+    if _bookmarks_cache is not None:
+        return list(_bookmarks_cache)  # Return copy to prevent mutation
 
-    bookmarks_path = Path(__file__).parent.parent / "data" / "bookmarks.json"
+    bookmarks_path_val = _bookmarks_path()
 
-    if bookmarks_path.exists():
+    if bookmarks_path_val.exists():
         try:
-            with open(bookmarks_path) as f:
+            with open(bookmarks_path_val) as f:
                 data = json.load(f)
-                return data.get("bookmarks", [])
+                _bookmarks_cache = data.get("bookmarks", [])
+                return list(_bookmarks_cache)
         except Exception as e:
-            print(f"Warning: Could not load bookmarks from {bookmarks_path}: {e}")
+            logger.warning(f"Could not load bookmarks from {bookmarks_path_val}: {e}")
             return []
     else:
-        print(f"Info: Bookmarks file not found at {bookmarks_path}, using empty list")
+        logger.info(f"Bookmarks file not found at {bookmarks_path_val}, using empty list")
         return []
 
 
 def save_bookmarks(bookmark_ids: list):
     """
-    Save bookmark app IDs to JSON file.
+    Save bookmark app IDs to JSON file (atomic write via tmp + rename).
 
     Args:
         bookmark_ids: List of desktop file IDs to save
-
-    Example:
-        save_bookmarks(["firefox.desktop", "code.desktop"])
     """
-    import json
+    import os
 
-    bookmarks_path = Path(__file__).parent.parent / "data" / "bookmarks.json"
+    global _bookmarks_cache
 
-    # Ensure data directory exists
-    bookmarks_path.parent.mkdir(parents=True, exist_ok=True)
+    path = _bookmarks_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        with open(bookmarks_path, "w") as f:
-            json.dump({"bookmarks": bookmark_ids}, f, indent=2)
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps({"bookmarks": bookmark_ids}, indent=2))
+        os.replace(str(tmp_path), str(path))
+        _bookmarks_cache = list(bookmark_ids)
+        logger.debug(f"Saved {len(bookmark_ids)} bookmarks")
     except Exception as e:
-        print(f"Error: Could not save bookmarks to {bookmarks_path}: {e}")
+        logger.error(f"Could not save bookmarks to {path}: {e}")
 
 
 def add_bookmark(app_id: str):
@@ -390,5 +432,3 @@ def is_bookmarked(app_id: str) -> bool:
     """
     bookmarks = load_bookmarks()
     return app_id in bookmarks
-
-

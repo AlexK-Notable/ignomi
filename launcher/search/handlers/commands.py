@@ -20,23 +20,20 @@ Usage: !lock, !suspend, etc.
 
 import subprocess
 from pathlib import Path
+
 import toml
-from search.router import SearchHandler, ResultItem
+from loguru import logger
+from search.router import ResultItem
 
 
-class CustomCommandsHandler(SearchHandler):
+class CustomCommandsHandler:
     """Execute user-defined commands via '!' prefix."""
+
+    name = "commands"
+    priority = 300
 
     def __init__(self):
         self.commands = self._load_commands()
-
-    @property
-    def name(self) -> str:
-        return "commands"
-
-    @property
-    def priority(self) -> int:
-        return 300
 
     def matches(self, query: str) -> bool:
         return query.strip().startswith("!")
@@ -89,7 +86,7 @@ class CustomCommandsHandler(SearchHandler):
                     stderr=subprocess.DEVNULL,
                 )
             except Exception:
-                pass
+                logger.exception(f"Failed to execute command: {exec_str}")
 
         from utils.helpers import close_launcher
         close_launcher()
@@ -102,6 +99,13 @@ class CustomCommandsHandler(SearchHandler):
 
         try:
             data = toml.load(commands_path)
-            return data.get("commands", {})
+            commands = data.get("commands", {})
+            # Validate entries
+            for name, cmd in list(commands.items()):
+                if not isinstance(cmd, dict) or "exec" not in cmd:
+                    logger.warning(f"Skipping malformed command '{name}': missing 'exec' field")
+                    del commands[name]
+            return commands
         except Exception:
+            logger.exception(f"Failed to load commands from {commands_path}")
             return {}
