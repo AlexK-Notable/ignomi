@@ -31,12 +31,6 @@ window.ignomi-window.background,
     background-color: transparent;
 }
 
-/* Full-screen backdrop — neutral gray at minimum alpha for blur trigger.
-   Compositor needs non-zero alpha; gray is perceptually neutral. */
-.ignomi-backdrop-fill {
-    background-color: rgba(128, 128, 128, 0.01);
-}
-
 /* Panel containers */
 .panel {
     background-color: @bg_65;

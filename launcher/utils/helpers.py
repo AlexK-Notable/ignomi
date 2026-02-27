@@ -207,9 +207,9 @@ def close_launcher():
     """
     Close all Ignomi launcher windows including backdrop.
 
-    Bookmarks/frequent/backdrop: Hyprland layerrules handle animation.
-    Search panel: GTK Revealer handles crossfade — unreveal first,
-    then hide the window after the animation completes.
+    Backdrop: reverse blur animation, then hide.
+    Search panel: GTK Revealer crossfade, then hide.
+    Bookmarks/frequent: Hyprland layerrules handle slide animation.
     """
     from ignis.app import IgnisApp
 
@@ -217,10 +217,20 @@ def close_launcher():
 
     for window in app.get_windows():
         if window.namespace and window.namespace.startswith("ignomi-"):
-            if window.namespace == "ignomi-search":
+            if window.namespace == "ignomi-backdrop":
+                _close_backdrop(window)
+            elif window.namespace == "ignomi-search":
                 _close_search_panel(window)
             else:
                 window.set_visible(False)
+
+
+def _close_backdrop(window):
+    """Close backdrop with reverse blur animation, then hide."""
+    if hasattr(window, '_start_close_animation'):
+        window._start_close_animation(lambda: window.set_visible(False))
+    else:
+        window.set_visible(False)
 
 
 def _close_search_panel(window):
