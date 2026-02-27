@@ -28,7 +28,7 @@ from PIL import Image, ImageEnhance, ImageFilter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.helpers import get_monitor_under_cursor, update_window_monitor
+from utils.helpers import get_monitor_under_cursor
 
 # Default blur settings
 _BLUR_DEFAULTS = {
@@ -171,22 +171,31 @@ def _on_visibility_changed(window, param):
         window._anim_gen += 1
         gen = window._anim_gen
 
-        update_window_monitor(window)
         connector = _get_connector_for_monitor(window.monitor)
+        logger.debug(f"Backdrop opening: monitor_idx={window.monitor}, connector='{connector}'")
 
         def do_capture_and_stream():
             img, max_radius = _capture_and_prepare(connector)
             if img is None:
+                logger.warning(f"Backdrop capture failed: connector='{connector}'")
                 return
 
             width, height = img.size
             intervals = _ease_in_intervals(_OPEN_DURATION_MS, _BLUR_STEPS)
 
+            # Pre-load image data — PIL Image is NOT thread-safe, so
+            # img.tobytes() / img.filter() from multiple threads races.
+            # Load pixels once, then give each thread its own Image copy.
+            img.load()
+            base_bytes = img.tobytes()
+
             def blur_frame(i):
                 radius = int(max_radius * i / (_BLUR_STEPS - 1))
                 if radius == 0:
-                    return i, (img.tobytes(), width, height)
-                blurred = img.filter(ImageFilter.GaussianBlur(radius=radius))
+                    return i, (base_bytes, width, height)
+                # Each thread gets its own Image from the shared bytes
+                frame_img = Image.frombytes("RGB", (width, height), base_bytes)
+                blurred = frame_img.filter(ImageFilter.GaussianBlur(radius=radius))
                 return i, (blurred.tobytes(), width, height)
 
             # Generate all blur frames concurrently — ~60ms instead of ~400ms
@@ -238,6 +247,7 @@ def _display_frame(window, frame):
     try:
         texture = _rgb_to_texture(rgb_bytes, w, h)
         window._backdrop_picture.set_paintable(texture)
+        logger.debug(f"Backdrop: displayed frame {w}x{h} on monitor_idx={window.monitor}")
     except Exception as e:
         logger.warning(f"Failed to set backdrop frame: {e}")
 

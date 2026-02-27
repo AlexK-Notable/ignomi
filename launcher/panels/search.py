@@ -35,7 +35,6 @@ from utils.helpers import (
     get_monitor_under_cursor,
     launch_app,
     load_settings,
-    update_window_monitor,
 )
 
 
@@ -275,7 +274,7 @@ class SearchPanel:
     def _on_visibility_changed(self, window, param):
         """Handle visibility changes — reveal on open, clear on close."""
         if window.get_visible():
-            update_window_monitor(window)
+            # Monitor set by toggle_launcher() before visibility
 
             # Reveal content with crossfade animation
             self._revealer.set_reveal_child(True)

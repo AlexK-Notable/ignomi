@@ -30,7 +30,6 @@ from utils.helpers import (
     load_bookmarks,
     load_settings,
     save_bookmarks,
-    update_window_monitor,
 )
 
 
@@ -301,6 +300,6 @@ class BookmarksPanel:
         self._refresh_app_list()
 
     def _on_visibility_changed(self, window, param):
-        """Update monitor placement when window becomes visible."""
+        """Handle visibility changes — refresh bookmarks on open."""
         if window.get_visible():
-            update_window_monitor(window)
+            pass  # Monitor set by toggle_launcher() before visibility

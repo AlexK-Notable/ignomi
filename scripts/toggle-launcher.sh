@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-# Toggle the Ignomi launcher (all three panels)
+# Toggle the Ignomi launcher (all panels) with correct multi-monitor placement.
 #
-# Signal handlers in each panel automatically update monitor placement
-# when windows become visible, so we just toggle visibility.
-# Focus is handled by Python code that moves cursor to search entry.
+# Uses `ignis run-python` to execute toggle logic inside the running Ignis
+# process. This is required because wlr-layer-shell fixes the output (monitor)
+# at surface creation time — we must set window.monitor BEFORE toggling
+# visibility, which can only be done from within the process.
 
-# Toggle backdrop + all three panels (visibility signal will handle monitor placement)
-goignis toggle-window ignomi-backdrop &
-goignis toggle-window ignomi-bookmarks &
-goignis toggle-window ignomi-search &
-goignis toggle-window ignomi-frequent &
-wait
+ignis run-python "from utils.helpers import toggle_launcher; toggle_launcher()"

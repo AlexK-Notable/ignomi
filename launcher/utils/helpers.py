@@ -172,6 +172,50 @@ def update_window_monitor(window) -> None:
         window.monitor = cursor_monitor
 
 
+def toggle_launcher():
+    """
+    Toggle all Ignomi launcher panels with correct multi-monitor placement.
+
+    Must run inside the Ignis process (via ``ignis run-python`` or direct call).
+
+    wlr-layer-shell fixes the output (monitor) at surface creation time.
+    Setting ``window.monitor`` only takes effect on the NEXT show, so we must:
+    1. Detect cursor monitor while windows are still hidden
+    2. Set ``.monitor`` on every window
+    3. Then toggle visibility
+
+    This replaces per-panel ``update_window_monitor()`` calls in visibility
+    handlers, which fire too late (after the surface is already created).
+    """
+    from ignis.app import IgnisApp
+
+    app = IgnisApp.get_default()
+    target_monitor = get_monitor_under_cursor()
+
+    # Collect all ignomi windows
+    ignomi_windows = [
+        w for w in app.get_windows()
+        if w.namespace and w.namespace.startswith("ignomi-")
+    ]
+
+    if not ignomi_windows:
+        return
+
+    # Determine current state from any panel (they toggle together)
+    currently_visible = any(w.get_visible() for w in ignomi_windows)
+
+    if currently_visible:
+        # Closing — use close_launcher() for proper animation sequencing
+        close_launcher()
+    else:
+        # Opening — set monitors BEFORE showing (Layer Shell requirement)
+        for w in ignomi_windows:
+            w.monitor = target_monitor
+
+        for w in ignomi_windows:
+            w.set_visible(True)
+
+
 def launch_app(app, frecency_service, close_delay_ms: int = 300):
     """
     Launch an application, record in frecency, and auto-close launcher.

@@ -28,7 +28,6 @@ from utils.helpers import (
     get_monitor_under_cursor,
     launch_app,
     load_settings,
-    update_window_monitor,
 )
 
 
@@ -277,6 +276,6 @@ class FrequentPanel:
         add_bookmark_with_refresh(app.id, button)
 
     def _on_visibility_changed(self, window, param):
-        """Update monitor placement when window becomes visible."""
+        """Handle visibility changes."""
         if window.get_visible():
-            update_window_monitor(window)
+            pass  # Monitor set by toggle_launcher() before visibility
