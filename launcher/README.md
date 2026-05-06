@@ -57,25 +57,17 @@ launcher/
 1. Configures `loguru` to log warnings to stderr and debug-level lines to `~/.local/share/ignomi/ignomi.log` (rotated at 1 MB, 3 retained)
 2. Adds the launcher directory to `sys.path` (resolves symlinks for worktree support)
 3. Loads CSS files (`colors.css` then `main.css`) at "user" priority (800) to override global GTK4 styles
-4. Creates the backdrop window via `create_backdrop_window()`
-5. Instantiates all three panel classes and calls `create_window()` on each
-6. Stores panel references on window objects (`window.panel = panel`) for cross-panel communication
+4. Constructs `RootPanel`, which composes bookmarks/search/frequent + backdrop into a single Layer Shell window (`ignomi-launcher`)
+5. Calls `RootPanel.create_window()` to build that window
+6. Re-raises any panel-construction failures so `ignis init` exits non-zero rather than running a half-broken daemon (M9 failure-to-start handling)
 
 ```python
-from panels.backdrop import create_backdrop_window
-from panels.bookmarks import BookmarksPanel
-from panels.search import SearchPanel
-from panels.frequent import FrequentPanel
+from panels.root import RootPanel
 
-backdrop_window = create_backdrop_window()
-
-bookmarks_panel = BookmarksPanel()
-search_panel = SearchPanel()
-frequent_panel = FrequentPanel()
-
-bookmarks_window = bookmarks_panel.create_window()
-search_window = search_panel.create_window()
-frequent_window = frequent_panel.create_window()
+root_panel = RootPanel()
+root_window = root_panel.create_window()
+# root_window is a single widgets.Window (namespace="ignomi-launcher")
+# containing all three panels + backdrop in a widgets.Overlay.
 
 # Cross-panel access: window.panel gives back the Panel instance
 bookmarks_window.panel = bookmarks_panel
@@ -145,18 +137,23 @@ window = panel.create_window()  # widgets.Window anchored right
 Full-screen non-interactive layer that renders an animated blur of the desktop behind the launcher panels.
 
 ```python
-from panels.backdrop import create_backdrop_window
+```python
+from panels import backdrop
 
-backdrop_window = create_backdrop_window()  # widgets.Window with namespace="ignomi-backdrop"
+picture = backdrop.create_backdrop_widget()  # widgets.Picture, no Window
+backdrop.start_open_animation(picture, monitor_idx=0)
+backdrop.start_close_animation(picture, on_done=lambda: ...)
+backdrop.reset(picture)
 ```
 
-- Captures the current monitor with `grim` (PPM format) on every show
+- Functional API — no class, no Window. The single launcher window owns the `Picture` and places it at the base of a `widgets.Overlay`.
+- Captures the current monitor with `grim` (PPM format) on every open
 - Generates 7 progressively-blurred frames in a `ThreadPoolExecutor` using PIL `GaussianBlur`
 - Streams frames into a `GdkPixbuf` → `Gdk.Texture` and swaps them on the GTK main loop
 - Open animation: sharp → full blur with quadratic ease-in (~150 ms)
-- Close animation: full blur → sharp (cached frames, reverse playback) before hiding
+- Close animation: full blur → sharp (cached frames, reverse playback)
 - Per-monitor settings (radius, brightness) via the `_MONITOR_SETTINGS` dict at the top of `backdrop.py`
-- A `_start_close_animation` callable is attached to the window so `close_launcher()` can request the reverse animation
+- Re-entrancy: rapid double-close chains the new `on_done` instead of dropping it (the `_pending_on_done` attribute on the picture)
 - **PIL is not thread-safe** — each worker receives its own `Image.frombytes()` copy
 
 ### FrecencyService (`services/frecency.py`)
@@ -228,19 +225,18 @@ Panels communicate through three mechanisms:
 self.frecency.connect("changed", lambda x: self._refresh_apps())
 ```
 
-### 2. Direct Panel Access
-When the search panel adds a bookmark, `add_bookmark_with_refresh()` reaches into the bookmarks panel to trigger a refresh:
+### 2. RootPanel Singleton
+When the search panel adds a bookmark, `add_bookmark_with_refresh()` reaches the bookmarks panel through `RootPanel.get_default()`:
 
 ```python
 # In utils/helpers.py
-from ignis.app import IgnisApp
-app_instance = IgnisApp.get_default()
-bookmarks_window = app_instance.get_window("ignomi-bookmarks")
-if bookmarks_window and hasattr(bookmarks_window, 'panel'):
-    bookmarks_window.panel.refresh_from_disk()
+from panels.root import RootPanel
+root = RootPanel.get_default()
+if root is not None:
+    root.bookmarks_panel.refresh_from_disk()
 ```
 
-This works because `config.py` stores panel references as `window.panel` attributes.
+`RootPanel` is the singleton constructed in `config.py`; it owns all sub-panels as attributes (`bookmarks_panel`, `search_panel`, `frequent_panel`).
 
 ### 3. Shared Singletons
 All panels share the same service instances:
@@ -367,31 +363,28 @@ When adding a new handler, mirror the structure of `tests/test_calculator.py` �
 
 ## How to Add a New Panel
 
-1. Create `panels/your_panel.py` with a class following this pattern:
+Since A1, panels are widget-tree producers that get composed inside `RootPanel`'s single Layer Shell window — they no longer return their own `widgets.Window`. Add a new panel like this:
+
+1. Create `panels/your_panel.py`:
 
 ```python
 from ignis import widgets
-from utils.helpers import get_monitor_under_cursor
 
 class YourPanel:
     def __init__(self):
         # Initialize services and state
         pass
 
-    def create_window(self):
-        # Build widget tree, return widgets.Window
-        window = widgets.Window(
-            namespace="ignomi-yourpanel",
-            monitor=get_monitor_under_cursor(),
-            anchor=["top", "bottom"],  # Choose anchoring
-            layer="top",
-            visible=False,
-            child=widgets.Box(...)
+    def create_widget(self):
+        # Build a widget tree (no Window) and return it.
+        # RootPanel wraps it in a Revealer + places it in the Overlay layout.
+        return widgets.Box(
+            vertical=True,
+            vexpand=True,
+            valign="center",
+            child=[...],
         )
-        return window
 ```
-
-> **Do not** add a per-panel `notify::visible` monitor-update handler. `toggle_launcher()` in `utils/helpers.py` sets `window.monitor` on every panel *before* showing them, which is the only reliable point in the wlr-layer-shell lifecycle to do so.
 
 2. Export from `panels/__init__.py`:
 ```python
@@ -399,17 +392,11 @@ from .your_panel import YourPanel
 __all__ = [..., "YourPanel"]
 ```
 
-3. Instantiate in `config.py`:
-```python
-from panels.your_panel import YourPanel
-your_panel = YourPanel()
-your_window = your_panel.create_window()
-your_window.panel = your_panel
-```
+3. Wire into `RootPanel.create_window()` (`panels/root.py`): instantiate, create the widget, wrap in a Revealer, place in the layout HBox.
 
-4. The toggle script (`scripts/toggle-launcher.sh`) calls `toggle_launcher()` which discovers all windows whose namespace starts with `ignomi-` — no script edit needed.
+4. `toggle_launcher()` and `close_launcher()` work automatically — they only deal with the single launcher window.
 
-5. `close_launcher()` in `utils/helpers.py` will hide your window automatically. If your panel needs a custom close animation, follow the `_close_search_panel` / `_close_backdrop` pattern in `helpers.py` (attach a `_start_close_animation` attribute to the window, then add a branch to `close_launcher`).
+5. If your panel needs a custom open/close animation independent of the surrounding launcher, give it its own internal Revealer (the search panel pattern). RootPanel already orchestrates parallel reveal/unreveal across panels.
 
 ## How to Add a New Search Handler
 

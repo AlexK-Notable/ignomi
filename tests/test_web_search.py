@@ -1,43 +1,11 @@
 """
 Tests for the WebSearchHandler.
 
-Tests URL construction, engine matching, prefix handling, and xdg-open usage.
+Tests URL construction, engine matching, prefix handling, and xdg-open
+usage. Ignis/GTK module mocks are installed by conftest.py.
 """
 
-import sys
-import types
-from unittest.mock import MagicMock
-
-# Patch ignis modules needed by search.handlers.__init__ → controls.py
-_saved_modules = {}
-_modules_to_fake = [
-    "ignis", "ignis.widgets",
-    "ignis.services", "ignis.services.audio", "ignis.services.backlight",
-]
-for _mod in _modules_to_fake:
-    if _mod in sys.modules:
-        _saved_modules[_mod] = sys.modules[_mod]
-
-_fake_ignis = types.ModuleType("ignis")
-_fake_ignis.widgets = MagicMock()
-_fake_services = types.ModuleType("ignis.services")
-_fake_services.audio = MagicMock()
-_fake_services.backlight = MagicMock()
-_fake_ignis.services = _fake_services
-
-sys.modules["ignis"] = _fake_ignis
-sys.modules["ignis.widgets"] = _fake_ignis.widgets
-sys.modules["ignis.services"] = _fake_services
-sys.modules["ignis.services.audio"] = _fake_services.audio
-sys.modules["ignis.services.backlight"] = _fake_services.backlight
-
 from search.handlers.web_search import DEFAULT_ENGINES, WebSearchHandler
-
-for _mod in _modules_to_fake:
-    if _mod in _saved_modules:
-        sys.modules[_mod] = _saved_modules[_mod]
-    elif _mod in sys.modules:
-        del sys.modules[_mod]
 
 
 class TestWebSearchMatching:

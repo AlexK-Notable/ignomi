@@ -25,7 +25,6 @@ from utils.helpers import (
     add_bookmark_with_refresh,
     clear_container,
     find_app_by_id,
-    get_monitor_under_cursor,
     launch_app,
     load_settings,
 )
@@ -76,16 +75,16 @@ class FrequentPanel:
 
         return apps
 
-    def create_window(self):
+    def create_widget(self):
         """
-        Create the frequent apps panel window.
+        Create the frequent panel widget tree (no Window wrapper).
 
-        Animations are handled by Hyprland compositor layerrules,
-        not by GTK Revealer. Using plain Window avoids the dual-animation
-        conflict that caused visual artifacts.
+        Used by RootPanel to compose a single Layer Shell window.
+        Returns the content widget — RootPanel wraps it in a Revealer
+        for slide-left animation.
 
         Returns:
-            widgets.Window positioned on right edge
+            widgets.Box — the frequent content tree
         """
         # Create app list container
         self.app_list_box = widgets.Box(
@@ -97,11 +96,14 @@ class FrequentPanel:
         # Populate with frequent apps
         self._refresh_app_list()
 
-        # Panel content
-        content = widgets.Box(
+        return widgets.Box(
             vertical=True,
             vexpand=True,
             valign="center",
+            halign="end",
+            margin_end=8,
+            margin_top=8,
+            margin_bottom=8,
             child=[
                 widgets.Box(
                     vertical=True,
@@ -122,24 +124,6 @@ class FrequentPanel:
                 )
             ]
         )
-
-        window = widgets.Window(
-            namespace="ignomi-frequent",
-            css_classes=["ignomi-window"],
-            monitor=get_monitor_under_cursor(),
-            anchor=["right", "top", "bottom"],
-            exclusivity="ignore",
-            kb_mode="on_demand",
-            layer="overlay",
-            default_width=320,
-            visible=False,
-            margin_top=8,
-            margin_bottom=8,
-            margin_right=8,
-            child=content,
-        )
-
-        return window
 
     def _refresh_apps(self):
         """Callback when frecency data changes."""

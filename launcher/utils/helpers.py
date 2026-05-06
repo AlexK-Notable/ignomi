@@ -149,76 +149,74 @@ def add_bookmark_with_refresh(app_id: str, button=None) -> None:
         button.add_css_class("bookmark-added")
         GLib.timeout_add(300, lambda: button.remove_css_class("bookmark-added"))
 
-    # Refresh bookmarks panel
-    from ignis.app import IgnisApp
-    app_instance = IgnisApp.get_default()
-    bookmarks_window = app_instance.get_window("ignomi-bookmarks")
-    if bookmarks_window and hasattr(bookmarks_window, 'panel'):
-        bookmarks_window.panel.refresh_from_disk()
+    # Refresh bookmarks panel via RootPanel singleton
+    from panels.root import RootPanel
+    root = RootPanel.get_default()
+    if root is not None:
+        root.bookmarks_panel.refresh_from_disk()
 
 
 def toggle_launcher():
     """
-    Toggle all Ignomi launcher panels with correct multi-monitor placement.
+    Toggle the single Ignomi launcher window.
 
-    Must run inside the Ignis process (via ``ignis run-python`` or direct call).
+    Must run inside the Ignis process (via ``ignis run-python`` or direct
+    call). wlr-layer-shell fixes the output (monitor) at surface creation
+    time, so we set `window.monitor` BEFORE making the window visible.
 
-    wlr-layer-shell fixes the output (monitor) at surface creation time.
-    Setting ``window.monitor`` only takes effect on the NEXT show, so we must:
-    1. Detect cursor monitor while windows are still hidden
-    2. Set ``.monitor`` on every window
-    3. Then toggle visibility
-
-    This replaces a previous per-panel approach where each visibility handler
-    rebound `window.monitor` — that fired too late, after the surface was
-    already created against the old monitor.
+    Since the A1 refactor there's just one launcher window —
+    `RootPanel.get_default().window` — so this is a single visibility
+    toggle plus a monitor rebinding.
     """
-    from ignis.app import IgnisApp
+    from panels.root import RootPanel
 
-    app = IgnisApp.get_default()
-    target_monitor = get_monitor_under_cursor()
-
-    # Collect all ignomi windows
-    ignomi_windows = [
-        w for w in app.get_windows()
-        if w.namespace and w.namespace.startswith("ignomi-")
-    ]
-
-    if not ignomi_windows:
+    root = RootPanel.get_default()
+    if root is None or root.window is None:
         return
 
-    # Determine current state from any panel (they toggle together)
-    currently_visible = any(w.get_visible() for w in ignomi_windows)
-
-    if currently_visible:
-        # Closing — use close_launcher() for proper animation sequencing
-        close_launcher()
+    window = root.window
+    if window.get_visible():
+        # Closing — orchestrated close (panels unreveal, backdrop reverses,
+        # then the window hides itself).
+        root.close()
     else:
-        # Opening — set monitors BEFORE showing (Layer Shell requirement)
-        for w in ignomi_windows:
-            w.monitor = target_monitor
-
-        for w in ignomi_windows:
-            w.set_visible(True)
+        # Opening — bind to the cursor's current monitor BEFORE showing.
+        window.monitor = get_monitor_under_cursor()
+        window.set_visible(True)
 
 
 def launch_app(app, frecency_service, close_delay_ms: int = 300):
     """
     Launch an application, record in frecency, and auto-close launcher.
 
+    Failure-mode contract: if ``app.launch()`` raises (broken .desktop file,
+    missing binary, dbus error, etc.), the failure is logged and the
+    auto-close timer fires anyway. We do NOT record the launch in frecency
+    on failure — we don't want a perma-broken app to climb the frequent
+    list. The launcher always closes regardless of launch outcome so the
+    user is never stuck staring at an apparently-frozen launcher.
+
     Args:
         app: Application object from ApplicationsService
         frecency_service: FrecencyService instance for tracking
         close_delay_ms: Delay in milliseconds before closing launcher
     """
-    # Launch the application
-    app.launch()
-    logger.debug(f"Launched {app.id}")
+    launched = False
+    try:
+        app.launch()
+        launched = True
+        logger.debug(f"Launched {app.id}")
+    except Exception:
+        logger.exception(f"Failed to launch {app.id}")
 
-    # Record in frecency for usage tracking
-    frecency_service.record_launch(app.id)
+    if launched:
+        # Record in frecency only on successful launch
+        try:
+            frecency_service.record_launch(app.id)
+        except Exception:
+            logger.exception(f"Failed to record frecency for {app.id}")
 
-    # Schedule auto-close after delay
+    # Always schedule auto-close, even on failure — user shouldn't be stuck
     GLib.timeout_add(close_delay_ms, lambda: _close_launcher_callback())
 
 
@@ -235,48 +233,19 @@ def _close_launcher_callback() -> bool:
 
 def close_launcher():
     """
-    Close all Ignomi launcher windows including backdrop.
+    Close the single Ignomi launcher window with orchestrated animation.
 
-    Backdrop: reverse blur animation, then hide.
-    Search panel: GTK Revealer crossfade, then hide.
-    Bookmarks/frequent: Hyprland layerrules handle slide animation.
+    Internally: panels unreveal in parallel, backdrop reverses its blur,
+    and the window hides once the backdrop animation reports done. This
+    used to be a per-window dispatch (backdrop + search + edges) — since
+    the A1 refactor it's a single `RootPanel.close()` call.
     """
-    from ignis.app import IgnisApp
+    from panels.root import RootPanel
 
-    app = IgnisApp.get_default()
-
-    for window in app.get_windows():
-        if window.namespace and window.namespace.startswith("ignomi-"):
-            if window.namespace == "ignomi-backdrop":
-                _close_backdrop(window)
-            elif window.namespace == "ignomi-search":
-                _close_search_panel(window)
-            else:
-                window.set_visible(False)
-
-
-def _close_backdrop(window):
-    """Close backdrop with reverse blur animation, then hide."""
-    if hasattr(window, '_start_close_animation'):
-        window._start_close_animation(lambda: window.set_visible(False))
-    else:
-        window.set_visible(False)
-
-
-def _close_search_panel(window):
-    """Close the search panel with GTK Revealer animation.
-
-    Traverses centering Box → Revealer. The notify::child-revealed
-    signal on the Revealer hides the window when animation finishes.
-    """
-    # Window child is the centering Box; Revealer is its first child
-    centering_box = window.get_child()
-    if centering_box:
-        revealer = centering_box.get_first_child()
-        if revealer and hasattr(revealer, 'set_reveal_child'):
-            revealer.set_reveal_child(False)
-            return
-    window.set_visible(False)
+    root = RootPanel.get_default()
+    if root is None:
+        return
+    root.close()
 
 
 # -- Settings cache --
@@ -294,7 +263,11 @@ def load_settings() -> dict[str, Any]:
     if _settings_cache is not None:
         return _settings_cache
 
-    # Default settings
+    # Default settings — kept aligned with launcher/data/settings.toml.
+    # Every section that exists in the TOML file appears here so
+    # `settings.get("section", {}).get("key", default)` patterns work
+    # uniformly regardless of whether the file is present, partial, or
+    # complete. New sections in settings.toml MUST be mirrored here.
     defaults = {
         "launcher": {
             "close_delay_ms": 300,
@@ -309,6 +282,16 @@ def load_settings() -> dict[str, Any]:
         },
         "animation": {
             "transition_duration": 200,
+        },
+        "web_search": {
+            # Engines empty by default; WebSearchHandler falls back to its
+            # own DEFAULT_ENGINES dict when the section is empty/missing.
+            "engines": {},
+        },
+        "backdrop": {
+            # Per-monitor blur overrides keyed by Wayland connector name.
+            # Empty by default; backdrop._MONITOR_SETTINGS supplies fallback.
+            "monitors": {},
         },
     }
 

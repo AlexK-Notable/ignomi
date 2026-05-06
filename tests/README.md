@@ -57,13 +57,20 @@ Approximate total: **~70-80 tests across 8 files** (consistent with the project 
 
 ## Coverage gaps
 
-The current suite leaves several user-visible code paths untested. These are honest gaps, not "we test it elsewhere" — they are real test debt:
+Closed in the 2026-05 A1 sprint:
 
-- **`SystemControlsHandler`** (`launcher/search/handlers/controls.py`) — **no tests**, even though it has the highest priority (50) of all handlers and contains graceful-degradation logic for missing audio/backlight services. The inline `widget_builder` pattern is also untested.
-- **`backdrop.py`** — no tests for the PIL blur pipeline, the ease-in interval math, the generation counter that cancels stale frame jobs, the per-monitor settings lookup, or the PIL thread-safety guarantee documented in MEMORY.md.
-- **Panel classes themselves** (`BookmarksPanel`, `SearchPanel`, `FrequentPanel`) — only their downstream services and handlers are exercised. Window construction, monitor binding, signal wiring, and lifecycle are all untested.
-- **`toggle_launcher()` / `close_launcher()` / `_close_search_panel` / `_close_backdrop`** — Layer Shell monitor-binding logic is untested despite a documented history of bugs in this exact area.
-- **`get_monitor_under_cursor()` / `hyprland_monitor_to_ignis_monitor()`** — both untested. These wrap HyprlandService IPC and a connector-name lookup; both have been bug sites in past sprints.
+- **`SystemControlsHandler`** is now covered by `tests/test_controls.py` (matches/get_results + both branches of `_audio_available`/`_backlight_available`).
+- **`_ease_in_intervals`** in `backdrop.py` is covered by `tests/test_backdrop_pure.py` (validates the quadratic curve and the 10ms floor).
+- **`launch_app`** happy and failure paths are covered by `tests/test_helpers_lifecycle.py` (the N17 fix — failed `app.launch()` no longer leaves the launcher visible).
+- **`_bookmarks_path()`** XDG migration is covered by `tests/test_helpers_xdg.py`.
+- **`get_monitor_under_cursor()` / `hyprland_monitor_to_ignis_monitor()`** are covered by `tests/test_monitor_helpers.py`.
+
+Still uncovered (real test debt):
+
+- **`backdrop.py`** beyond `_ease_in_intervals` — the PIL frame stream, generation counter, threaded capture, per-monitor settings lookup are all untested.
+- **Panel classes themselves** (`BookmarksPanel`, `SearchPanel`, `FrequentPanel`) — widget construction, signal wiring, drag-drop, key navigation are all untested.
+- **`RootPanel`** open/close orchestration — the parallel Revealer unreveal + backdrop reverse-blur sequence has no unit test. The cage smoke test exercises it indirectly.
+- **`toggle_launcher()` / `close_launcher()`** integration with the new `RootPanel.get_default()` singleton path.
 
 ## Headless-test pattern
 
@@ -139,7 +146,7 @@ If you add a test that imports a new Ignis or `gi` symbol, extend the appropriat
 ### HIGH
 
 - **`test_controls.py`** — `SystemControlsHandler` is priority 50 (the highest of all handlers) and contains graceful-degradation logic in `_audio_available` / `_backlight_available`. Both branches of each guard need verification, plus the inline `widget_builder` pattern. Mocks needed: `ignis.services.audio.AudioService.get_default()` and `ignis.services.backlight.BacklightService.get_default()` — extend `test_app_search.py`'s Pattern 1 fakes to return `MagicMock` instances with the relevant attributes.
-- **`test_helpers.py`** — `_close_search_panel`, `_close_backdrop`, and `toggle_launcher` have a documented bug history (Layer Shell monitor binding fired too late from per-panel handlers). At minimum: a state-machine test that exercises `IgnisApp` window discovery + `window.monitor` rebinding + `window.visible` toggle, with all of these mocked. Use Pattern 2 to keep the test self-contained.
+- **Extend `tests/test_helpers_lifecycle.py`** to cover `toggle_launcher` and `close_launcher` against the new `RootPanel.get_default()` singleton path (mock the singleton).
 
 ### MED
 

@@ -24,12 +24,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    ```
    Bind this to a hotkey in your compositor config.
 
-3. **Manually open all four surfaces** (debugging only):
+3. **Manually open the launcher** (debugging only):
    ```bash
-   ignis open-window ignomi-backdrop && \
-   ignis open-window ignomi-bookmarks && \
-   ignis open-window ignomi-search && \
-   ignis open-window ignomi-frequent
+   ignis open-window ignomi-launcher
    ```
 
 ### Development Commands
@@ -47,30 +44,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Common Launch Issues
 
 - **"Ignis is not running"** — run `ignis init &` first.
-- **"No such window: ignomi"** — there is no aggregate window. Use `ignomi-backdrop`, `ignomi-bookmarks`, `ignomi-search`, `ignomi-frequent`.
+- **"No such window: ignomi"** — the registered namespace is `ignomi-launcher` (post-A1).
 - **Config not loading** — verify the symlink: `readlink ~/.config/ignis/config.py` should print `/home/komi/repos/ignomi/launcher/config.py` (not a worktree).
 - **Wrong monitor on toggle** — `wlr-layer-shell` binds output at surface creation; `toggle_launcher()` sets `window.monitor` BEFORE showing. Always toggle via `scripts/toggle-launcher.sh` or call `toggle_launcher()` from inside the process — opening windows individually via `ignis open-window` skips the monitor-detection step.
 
 ## Architecture Overview
 
-### Four Layer-Shell Surfaces
+### Single Layer Shell Surface (post-A1 refactor, 2026-05)
 
-Ignomi is a Wayland launcher built on the Ignis framework (GTK4 + Layer Shell). It runs as a single process and exposes four independent surfaces:
+Ignomi is a Wayland launcher built on the Ignis framework (GTK4 + Layer Shell). It runs as a single process and exposes **one** Layer Shell surface — `ignomi-launcher` — that hosts all panels via a `widgets.Overlay`.
 
-| Surface | Module | Anchor | Layer | Exclusivity | Animation source |
-|---------|--------|--------|-------|-------------|------------------|
-| `ignomi-backdrop` | `launcher/panels/backdrop.py` | top+bottom+left+right (full-screen) | `top` | `ignore` | Custom blur frames (PIL → GdkPixbuf) |
-| `ignomi-bookmarks` | `launcher/panels/bookmarks.py` | left+top+bottom | `overlay` | `ignore` | Hyprland layerrules |
-| `ignomi-search` | `launcher/panels/search.py` | top+bottom (centered) | `overlay` | `ignore` | GTK Revealer crossfade |
-| `ignomi-frequent` | `launcher/panels/frequent.py` | right+top+bottom | `overlay` | `ignore` | Hyprland layerrules |
+| Component | Module | Role |
+|-----------|--------|------|
+| `RootPanel` | `launcher/panels/root.py` | Owns the single window; composes everything; orchestrates open/close |
+| `BookmarksPanel` | `launcher/panels/bookmarks.py` | `create_widget()` returns left-aligned content; revealed via `slide_right` Revealer |
+| `SearchPanel` | `launcher/panels/search.py` | `create_widget()` returns centered content with internal `crossfade` Revealer |
+| `FrequentPanel` | `launcher/panels/frequent.py` | `create_widget()` returns right-aligned content; revealed via `slide_left` Revealer |
+| backdrop module | `launcher/panels/backdrop.py` | Functional API (`create_backdrop_widget`, `start_open_animation`, `start_close_animation`, `reset`); animates blur on a `widgets.Picture` placed at the base of the Overlay |
 
-All surfaces use `exclusivity="ignore"` so the centered search panel does not jump when the edge panels release their exclusive zones — see `project-docs/discoveries/` and zettelkasten note `[[20260226T022743651177993774]]` for the multi-hour debugging story.
+The single window: `namespace="ignomi-launcher"`, `anchor=["top","bottom","left","right"]`, `layer="overlay"`, `exclusivity="ignore"`, `kb_mode="on_demand"`. Why one surface:
 
-### Animation Architecture (read this before touching panel open/close)
+- The compositor never sees siblings, so the search-panel-drift bug class is impossible by construction (see z-note `[[20260226T022743651177993774]]` for the historical issue).
+- All animations are GTK Revealers; nothing in Hyprland's `windowrules.conf` needs Ignomi-specific rules anymore.
+- `close_launcher()` becomes one method call (`RootPanel.close()`) instead of per-surface dispatch.
 
-- **Edge-anchored panels (`bookmarks`, `frequent`) and the `backdrop`** rely on Hyprland `layerrule animation slide ...` rules in `~/.config/hypr/config/windowrules.conf`. They use plain `widgets.Window`, NOT `RevealerWindow` — combining the two produces a dual-animation conflict.
-- **The centered `search` panel uses a GTK Revealer** (`transition_type="crossfade"`) wrapped in a centering Box. Centered surfaces drift laterally under compositor slide animations, so we let GTK own the transition for the search panel only.
-- `close_launcher()` in `launcher/utils/helpers.py` dispatches per-surface: backdrop runs its reverse blur, search runs the Revealer unreveal (then hides on `notify::child-revealed`), bookmarks/frequent just toggle `visible=False` and let Hyprland animate.
+### Animation Architecture
+
+- **All panel animations are GTK Revealers**, internal to the single launcher window. Bookmarks → `slide_right` (200 ms), search → `crossfade` (200 ms), frequent → `slide_left` (200 ms). Backdrop runs its blur frame stream on the underlying `widgets.Picture`.
+- **Iron rule still applies**: never apply Hyprland `layerrule animation` to the launcher namespace AND a GTK Revealer to a child — that produced the original dual-animation conflict (z-note `[[20260225T072152714557306660]]`). Today we don't, because we have one Layer Shell window with no layerrules.
+- `close_launcher()` (`launcher/utils/helpers.py`) calls `RootPanel.close()`, which unreveals all three Revealers in parallel, runs the backdrop reverse blur, and hides the window when the backdrop's `on_done` callback fires.
 
 ### Search Router Subsystem (`launcher/search/`)
 
@@ -102,10 +104,10 @@ launcher/search/
 - Cancellation: `window._anim_gen` is incremented on every visibility change; in-flight callbacks compare `gen` and bail if stale.
 - Per-monitor overrides: edit `_MONITOR_SETTINGS` (connector → `{radius, brightness}`) at the top of `backdrop.py`. There is currently NO `[backdrop]` section in `settings.toml`.
 
-### Cross-Surface Communication
+### Cross-Panel Communication
 
 1. **GObject signals**: `FrecencyService` emits `changed` → `FrequentPanel._refresh_apps`.
-2. **Direct panel access via IgnisApp**: `add_bookmark_with_refresh()` (`utils/helpers.py`) reaches the bookmarks window via `IgnisApp.get_default().get_window("ignomi-bookmarks")` and calls `panel.refresh_from_disk()`.
+2. **RootPanel singleton**: `add_bookmark_with_refresh()` (`utils/helpers.py`) reaches the bookmarks panel via `RootPanel.get_default().bookmarks_panel.refresh_from_disk()`. No more `IgnisApp.get_window(...)` reach-throughs.
 3. **Singletons**: `get_frecency_service()`, `ApplicationsService.get_default()`, `HyprlandService.get_default()` are shared across all panels.
 
 ### Key Services
@@ -122,9 +124,10 @@ launcher/search/
 - Mapping Hyprland `monitor.name` (connector, e.g. `DP-1`) → GTK monitor index is done via `Gdk.Display.get_default().get_monitors()`.
 
 **`toggle_launcher()`** (`launcher/utils/helpers.py`):
-- Single source of truth for opening/closing all surfaces atomically.
+- Toggles the single `ignomi-launcher` window via `RootPanel.get_default()`.
 - Must run **inside** the Ignis process — `wlr-layer-shell` fixes the output at surface creation, so `window.monitor` must be set BEFORE `set_visible(True)`.
-- `scripts/toggle-launcher.sh` is a one-line wrapper: `ignis run-python "from utils.helpers import toggle_launcher; toggle_launcher()"`. Using `ignis run-python` is critical — it is a single IPC call, atomic within the daemon's main loop, and avoids the racy "spawn N goignis processes in parallel" pattern.
+- Open path: rebind monitor, then `window.set_visible(True)`. Close path: `RootPanel.close()`, which orchestrates the parallel unreveal + backdrop reverse-blur + final `set_visible(False)`.
+- `scripts/toggle-launcher.sh` is a one-line wrapper: `ignis run-python "from utils import toggle_launcher; toggle_launcher()"`.
 
 ### Configuration Files
 
@@ -204,12 +207,20 @@ pytest tests/ -v
 - **Headless-import-mock pattern**: `test_app_search.py`, `test_bookmarks.py`, and `test_frecency.py` install `MagicMock` modules into `sys.modules` for `gi`, `gi.repository`, `ignis`, `ignis.widgets`, and `ignis.services.*` BEFORE importing the modules under test. This lets the suite run on a headless box (CI, remote shell) with no display server.
 - Only mock these specific surfaces: `time.time()`, `GObject.emit`, `BaseService.__init__`, `ApplicationsService.apps`. Real file I/O exercises real bugs.
 
-**Coverage gaps (uncovered, be honest with reviewers):**
-- `SystemControlsHandler` (`launcher/search/handlers/controls.py`)
-- `backdrop.py` (PIL pipeline, ease-in math, generation counter, monitor lookup)
-- `BookmarksPanel` / `SearchPanel` / `FrequentPanel` classes themselves
-- `toggle_launcher()`, `close_launcher()`, `_close_search_panel`, `_close_backdrop`
-- `get_monitor_under_cursor()`, `hyprland_monitor_to_ignis_monitor()`
+**Covered as of A1 sprint (2026-05):**
+- `SystemControlsHandler` matches/get_results + audio/backlight availability gates → `tests/test_controls.py`
+- `_ease_in_intervals` pure function (validates the quadratic curve fix) → `tests/test_backdrop_pure.py`
+- `launch_app` happy + failure paths (validates the N17 fix) → `tests/test_helpers_lifecycle.py`
+- `_bookmarks_path` XDG migration → `tests/test_helpers_xdg.py`
+- `get_monitor_under_cursor` / `hyprland_monitor_to_ignis_monitor` → `tests/test_monitor_helpers.py`
+
+**Still uncovered (real test debt):**
+- `backdrop.py` everything except `_ease_in_intervals` (PIL pipeline, generation counter, frame streaming, threaded capture)
+- `BookmarksPanel` / `SearchPanel` / `FrequentPanel` constructors and signal wiring
+- `RootPanel` open/close orchestration
+- `toggle_launcher()` / `close_launcher()` integration (the new RootPanel singleton path)
+
+There's also an opt-in cage smoke test at `tests/test_cage_smoke.py` — only runs if `cage`, `ignis`, and `wayland-info` are on PATH.
 
 ## Debugging
 

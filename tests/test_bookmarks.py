@@ -1,61 +1,17 @@
 """
-Tests for bookmark loading, saving, caching, XDG migration, and atomic writes.
-
-Uses real JSON files on disk. Mocks only GTK/Ignis imports.
+Tests for bookmark loading, saving, caching, XDG migration, and atomic
+writes. Uses real JSON files on disk. Ignis/GTK module mocks are
+installed by conftest.py.
 """
 
 import json
 import os
-import sys
-import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-# Patch GTK/Ignis modules for headless testing
-_saved_modules = {}
-_modules_to_fake = [
-    "gi", "gi.repository", "gi.repository.Gdk", "gi.repository.GLib",
-    "ignis", "ignis.services", "ignis.services.applications",
-    "ignis.services.hyprland",
-]
-for _mod in _modules_to_fake:
-    if _mod in sys.modules:
-        _saved_modules[_mod] = sys.modules[_mod]
-
-_fake_gi = types.ModuleType("gi")
-_fake_gi_repo = types.ModuleType("gi.repository")
-_fake_gi_repo.Gdk = MagicMock()
-_fake_gi_repo.GLib = MagicMock()
-_fake_gi.repository = _fake_gi_repo
-_fake_ignis = types.ModuleType("ignis")
-_fake_services = types.ModuleType("ignis.services")
-_fake_apps = types.ModuleType("ignis.services.applications")
-_fake_apps.ApplicationsService = MagicMock()
-_fake_hyprland = types.ModuleType("ignis.services.hyprland")
-_fake_hyprland.HyprlandService = MagicMock()
-_fake_ignis.services = _fake_services
-_fake_services.applications = _fake_apps
-_fake_services.hyprland = _fake_hyprland
-
-sys.modules["gi"] = _fake_gi
-sys.modules["gi.repository"] = _fake_gi_repo
-sys.modules["gi.repository.Gdk"] = _fake_gi_repo.Gdk
-sys.modules["gi.repository.GLib"] = _fake_gi_repo.GLib
-sys.modules["ignis"] = _fake_ignis
-sys.modules["ignis.services"] = _fake_services
-sys.modules["ignis.services.applications"] = _fake_apps
-sys.modules["ignis.services.hyprland"] = _fake_hyprland
-
 from utils.helpers import _deep_merge, load_bookmarks, save_bookmarks
-
-# Restore modules
-for _mod in _modules_to_fake:
-    if _mod in _saved_modules:
-        sys.modules[_mod] = _saved_modules[_mod]
-    elif _mod in sys.modules:
-        del sys.modules[_mod]
 
 
 @pytest.fixture(autouse=True)

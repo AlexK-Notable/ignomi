@@ -25,7 +25,6 @@ from services.frecency import get_frecency_service
 from utils.helpers import (
     clear_container,
     find_app_by_id,
-    get_monitor_under_cursor,
     launch_app,
     load_bookmarks,
     load_settings,
@@ -53,16 +52,16 @@ class BookmarksPanel:
         # Track drag state
         self.drag_source_index = None
 
-    def create_window(self):
+    def create_widget(self):
         """
-        Create the bookmarks panel window.
+        Create the bookmarks panel widget tree (no Window wrapper).
 
-        Animations are handled by Hyprland compositor layerrules,
-        not by GTK Revealer. Using plain Window avoids the dual-animation
-        conflict that caused visual artifacts.
+        Used by RootPanel to compose a single Layer Shell window
+        containing all three panels. Returns the content widget that
+        should be placed inside a Revealer for animation.
 
         Returns:
-            widgets.Window positioned on left edge
+            widgets.Box — the bookmarks content tree
         """
         # Create scrollable app list
         self.app_list_box = widgets.Box(
@@ -74,11 +73,15 @@ class BookmarksPanel:
         # Populate with bookmark buttons
         self._refresh_app_list()
 
-        # Panel content
-        content = widgets.Box(
+        # Panel content (centered vertically inside its slot)
+        return widgets.Box(
             vertical=True,
             vexpand=True,
             valign="center",
+            halign="start",
+            margin_start=8,
+            margin_top=8,
+            margin_bottom=8,
             child=[
                 widgets.Box(
                     vertical=True,
@@ -99,24 +102,6 @@ class BookmarksPanel:
                 )
             ]
         )
-
-        window = widgets.Window(
-            namespace="ignomi-bookmarks",
-            css_classes=["ignomi-window"],
-            monitor=get_monitor_under_cursor(),
-            anchor=["left", "top", "bottom"],
-            exclusivity="ignore",
-            kb_mode="on_demand",
-            layer="overlay",
-            default_width=320,
-            visible=False,
-            margin_top=8,
-            margin_bottom=8,
-            margin_left=8,
-            child=content,
-        )
-
-        return window
 
     def _refresh_app_list(self):
         """Rebuild the app list from current bookmarks."""

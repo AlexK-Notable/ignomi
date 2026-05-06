@@ -262,12 +262,10 @@ ignomi/
 # Start Ignis daemon (if not running)
 ignis init &
 
-# Open all three panels individually
-ignis open-window ignomi-bookmarks
-ignis open-window ignomi-search
-ignis open-window ignomi-frequent
+# Open the launcher (one window hosts all panels)
+ignis open-window ignomi-launcher
 
-# Or toggle all panels at once (same as the keybind)
+# Or toggle the launcher (same as the keybind)
 ./scripts/toggle-launcher.sh
 
 # Reload after code/CSS changes

@@ -1,31 +1,58 @@
 # Animation Architecture
 
-**Date:** 2026-04-30
-**Status:** Implemented (current as of commit `94b83cf`)
-**Scope:** All four Ignomi `widgets.Window` surfaces — bookmarks, search,
-frequent, and backdrop
+**Date:** 2026-04-30 (revised 2026-05-05 for A1 single-window refactor)
+**Status:** Implemented (current as of A1 refactor)
+**Scope:** The single Layer Shell surface `ignomi-launcher` and its
+internal panel Revealers.
 
 > **Why this document exists:** the animation story has changed at least
-> three times during Ignomi's development (RevealerWindow → plain Window →
-> plain Window + Revealer for the search panel only). Both `MEMORY.md` and
-> the original launcher design doc reflect older snapshots and are
-> internally inconsistent with the current code. This document is the
-> canonical reference for "which surface uses which animation system, and
-> why."
+> four times during Ignomi's development:
+>
+> 1. Per-panel `RevealerWindow` (origin)
+> 2. Plain `Window` per panel + Hyprland `layerrule` slide/fade (remediation sprint)
+> 3. Plain `Window` + Revealer for the search panel only (commit `94b83cf`)
+> 4. **Single `Window` with three internal Revealers + backdrop blur (A1 refactor, this doc)**
+>
+> Both `MEMORY.md` and the original launcher design doc reflect older
+> snapshots. This document is the canonical reference.
 
-## TL;DR
+## TL;DR (post-A1)
 
-| Surface             | Anchor          | Open/close anim       | Compositor anim?  | GTK animation widget? |
-| ------------------- | --------------- | --------------------- | ----------------- | --------------------- |
-| `ignomi-bookmarks`  | left (edge)     | slide right→left      | **yes** (Hyprland) | no                    |
-| `ignomi-frequent`   | right (edge)    | slide left→right      | **yes** (Hyprland) | no                    |
-| `ignomi-backdrop`   | full-screen     | fade + blur ramp      | **yes** (Hyprland fade) | no — pixel pipeline (see backdrop blur pipeline doc) |
-| `ignomi-search`     | top+bottom (centered) | crossfade (200ms) | **no** (`exclusivity="ignore"`) | **yes** (`widgets.Revealer`) |
+There is **one** Layer Shell window: `ignomi-launcher`. It uses:
 
-**The default rule:** plain `widgets.Window` + Hyprland `layerrule`. The
-search panel is the documented exception, for one specific reason: a
-centered surface with no edge anchor drifts laterally as Hyprland
-recomputes layout when sibling exclusive zones change.
+| Property      | Value          |
+| ------------- | -------------- |
+| `namespace`   | `ignomi-launcher` |
+| `anchor`      | `top, bottom, left, right` (full screen) |
+| `layer`       | `overlay` |
+| `exclusivity` | `ignore` |
+| `kb_mode`     | `on_demand` |
+
+Inside the window, a `widgets.Overlay` stacks:
+
+- **Base layer**: `widgets.Picture` (the backdrop) — animated blur via PIL frame stream.
+- **Top layer**: HBox with three sections, each animated by an internal Revealer:
+
+| Section    | Position | Revealer transition | Duration |
+| ---------- | -------- | ------------------- | -------- |
+| bookmarks  | left     | `slide_right`       | 200 ms   |
+| search     | center   | `crossfade`         | 200 ms   |
+| frequent   | right    | `slide_left`        | 200 ms   |
+
+**Why this is simpler than the old multi-surface design:**
+
+1. The compositor only ever sees one surface, so the search-panel-drift
+   bug class (sibling exclusive zones recomputing layout) is impossible
+   by construction.
+2. All animations are GTK Revealers — the dual-animation-system
+   complexity is gone. Hyprland `layerrule animation` rules for Ignomi
+   are no longer applicable; remove any from `windowrules.conf`.
+3. `toggle_launcher()` is one visibility flip + monitor rebind.
+   `close_launcher()` calls `RootPanel.close()` which orchestrates
+   parallel Revealer unreveal + backdrop reverse-blur and then hides
+   the window.
+
+## Pre-A1 historical content (kept for context)
 
 ## The Default Rule: Compositor-Driven Animation
 

@@ -28,8 +28,6 @@ from PIL import Image, ImageEnhance, ImageFilter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.helpers import get_monitor_under_cursor
-
 # Default blur settings
 _BLUR_DEFAULTS = {
     "radius": 20,
@@ -127,11 +125,17 @@ def _rgb_to_texture(rgb_bytes: bytes, width: int, height: int) -> Gdk.Texture:
     return Gdk.Texture.new_for_pixbuf(pixbuf)
 
 
-def create_backdrop_window():
-    """Create a full-screen backdrop with animated blur.
+def create_backdrop_widget():
+    """Create the backdrop Picture widget (no Window wrapper).
 
-    On open: captures monitor, streams frames sharp → blurred.
-    On close: animates blurred → sharp from cached frames, then hides.
+    Returns a widgets.Picture with `_backdrop_picture` and animation
+    state attributes attached for `start_open_animation` and
+    `start_close_animation` to operate on. The Picture is intended to
+    sit at the BASE of a `widgets.Overlay` inside the single Layer Shell
+    launcher window — so panels render on top of the blur.
+
+    Returns:
+        widgets.Picture configured as a backdrop carrier
     """
     picture = widgets.Picture(
         content_fit="cover",
@@ -139,179 +143,169 @@ def create_backdrop_window():
         vexpand=True,
     )
 
-    window = widgets.Window(
-        namespace="ignomi-backdrop",
-        css_classes=["ignomi-window", "ignomi-backdrop"],
-        monitor=get_monitor_under_cursor(),
-        anchor=["top", "bottom", "left", "right"],
-        exclusivity="ignore",
-        kb_mode="none",
-        layer="top",
-        visible=False,
-        child=picture,
-    )
+    # Animation state (attached to the Picture, not to a Window)
+    picture._blur_frames = None       # cached frames: sharp → blurred
+    picture._anim_gen = 0              # generation counter
+    picture._closing = False           # True during close animation
+    picture._pending_on_done = None    # chained close callback
+    picture._monitor_idx = 0           # set by start_open_animation
 
-    window._backdrop_picture = picture
-    window._blur_frames = None   # List of (rgb_bytes, w, h) from sharp → blurred
-    window._anim_gen = 0         # Generation counter to cancel stale animations
-    window._closing = False      # True during close animation
-    window._pending_on_done = None  # Latest on_done to fire when in-flight close finishes
-
-    # Export close animation for helpers.py to call
-    window._start_close_animation = lambda on_done: _start_close_animation(window, on_done)
-
-    window.connect("notify::visible", _on_visibility_changed)
-
-    return window
+    return picture
 
 
-def _on_visibility_changed(window, param):
-    """Handle visibility changes — start open animation or clean up."""
-    if window.get_visible():
-        window._closing = False
-        window._anim_gen += 1
-        gen = window._anim_gen
+def start_open_animation(picture, monitor_idx: int):
+    """Begin the screenshot-capture + blur-stream open animation.
 
-        connector = _get_connector_for_monitor(window.monitor)
-        logger.debug(f"Backdrop opening: monitor_idx={window.monitor}, connector='{connector}'")
+    Replaces the prior visibility-changed listener — RootPanel calls
+    this when the launcher window opens.
+    """
+    picture._closing = False
+    picture._monitor_idx = monitor_idx
+    picture._anim_gen += 1
+    gen = picture._anim_gen
 
-        def do_capture_and_stream():
-            img, max_radius = _capture_and_prepare(connector)
-            if img is None:
-                logger.warning(f"Backdrop capture failed: connector='{connector}'")
-                return
+    connector = _get_connector_for_monitor(monitor_idx)
+    logger.debug(f"Backdrop opening: monitor_idx={monitor_idx}, connector='{connector}'")
 
-            width, height = img.size
-            intervals = _ease_in_intervals(_OPEN_DURATION_MS, _BLUR_STEPS)
+    def do_capture_and_stream():
+        img, max_radius = _capture_and_prepare(connector)
+        if img is None:
+            logger.warning(f"Backdrop capture failed: connector='{connector}'")
+            return
 
-            # Pre-load image data — PIL Image is NOT thread-safe, so
-            # img.tobytes() / img.filter() from multiple threads races.
-            # Load pixels once, then give each thread its own Image copy.
-            img.load()
-            base_bytes = img.tobytes()
+        width, height = img.size
+        intervals = _ease_in_intervals(_OPEN_DURATION_MS, _BLUR_STEPS)
 
-            def blur_frame(i):
-                radius = int(max_radius * i / (_BLUR_STEPS - 1))
-                if radius == 0:
-                    return i, (base_bytes, width, height)
-                # Each thread gets its own Image from the shared bytes
-                frame_img = Image.frombytes("RGB", (width, height), base_bytes)
-                blurred = frame_img.filter(ImageFilter.GaussianBlur(radius=radius))
-                return i, (blurred.tobytes(), width, height)
+        # Pre-load image data — PIL Image is NOT thread-safe, so
+        # img.tobytes() / img.filter() from multiple threads races.
+        # Load pixels once, then give each thread its own Image copy.
+        img.load()
+        base_bytes = img.tobytes()
 
-            # Generate all blur frames concurrently — ~60ms instead of ~400ms
-            with ThreadPoolExecutor(max_workers=_BLUR_STEPS) as pool:
-                results = list(pool.map(blur_frame, range(_BLUR_STEPS)))
+        def blur_frame(i):
+            radius = int(max_radius * i / (_BLUR_STEPS - 1))
+            if radius == 0:
+                return i, (base_bytes, width, height)
+            # Each thread gets its own Image from the shared bytes
+            frame_img = Image.frombytes("RGB", (width, height), base_bytes)
+            blurred = frame_img.filter(ImageFilter.GaussianBlur(radius=radius))
+            return i, (blurred.tobytes(), width, height)
 
-            # Stream frames to main thread in order
-            for i, frame in results:
-                delay = intervals[i] if i < len(intervals) else 0
-                GLib.idle_add(_show_streamed_frame, window, frame, i, gen, delay)
+        # Generate all blur frames concurrently — ~60ms instead of ~400ms
+        with ThreadPoolExecutor(max_workers=_BLUR_STEPS) as pool:
+            results = list(pool.map(blur_frame, range(_BLUR_STEPS)))
 
-        threading.Thread(target=do_capture_and_stream, daemon=True).start()
-    else:
-        # Window hidden (after close animation or external close)
-        window._anim_gen += 1
-        window._backdrop_picture.set_paintable(None)
-        window._blur_frames = None
-        window._closing = False
+        # Stream frames to main thread in order
+        for i, frame in results:
+            delay = intervals[i] if i < len(intervals) else 0
+            GLib.idle_add(_show_streamed_frame, picture, frame, i, gen, delay)
+
+    threading.Thread(target=do_capture_and_stream, daemon=True).start()
 
 
-def _show_streamed_frame(window, frame, idx, gen, delay_ms):
+def reset(picture):
+    """Clear cached frames and paint state. Called after close completes."""
+    picture._anim_gen += 1
+    picture.set_paintable(None)
+    picture._blur_frames = None
+    picture._closing = False
+
+
+def _show_streamed_frame(picture, frame, idx, gen, delay_ms):
     """Display a frame streamed from the background thread.
 
     Frame 0 shows immediately. Subsequent frames are delayed by their
     eased interval, but only relative to when they arrive from the
     background thread — no artificial wait for all frames to generate.
     """
-    if window._anim_gen != gen or not window.get_visible():
+    if picture._anim_gen != gen:
         return False
 
     # Store frame for close animation
-    if window._blur_frames is None:
-        window._blur_frames = []
-    window._blur_frames.append(frame)
+    if picture._blur_frames is None:
+        picture._blur_frames = []
+    picture._blur_frames.append(frame)
 
     if idx == 0:
         # First frame (sharp) — show immediately
-        _display_frame(window, frame)
+        _display_frame(picture, frame)
     else:
         # Subsequent frames — show with eased delay
-        GLib.timeout_add(delay_ms, _display_frame_cb, window, frame, gen)
+        GLib.timeout_add(delay_ms, _display_frame_cb, picture, frame, gen)
 
     return False
 
 
-def _display_frame(window, frame):
+def _display_frame(picture, frame):
     """Set a frame as the backdrop image."""
     rgb_bytes, w, h = frame
     try:
         texture = _rgb_to_texture(rgb_bytes, w, h)
-        window._backdrop_picture.set_paintable(texture)
-        logger.debug(f"Backdrop: displayed frame {w}x{h} on monitor_idx={window.monitor}")
+        picture.set_paintable(texture)
+        logger.debug(f"Backdrop: displayed frame {w}x{h}")
     except Exception as e:
         logger.warning(f"Failed to set backdrop frame: {e}")
 
 
-def _display_frame_cb(window, frame, gen):
+def _display_frame_cb(picture, frame, gen):
     """GLib.timeout_add callback to display a frame (checks generation)."""
-    if window._anim_gen != gen:
+    if picture._anim_gen != gen:
         return False
-    _display_frame(window, frame)
+    _display_frame(picture, frame)
     return False
 
 
-def _start_close_animation(window, on_done):
+def start_close_animation(picture, on_done):
     """Start the reverse blur animation, call on_done when finished.
 
-    Called by close_launcher() instead of immediately hiding the window.
+    Called by close_launcher() before the launcher window hides.
     Uses cached frames from the open animation played in reverse.
 
     Re-entrancy: if a close is already in flight (e.g. rapid double-toggle),
     chain the new on_done to fire after the in-flight one — never drop it.
     """
-    if window._closing:
+    if picture._closing:
         if on_done:
-            prev = window._pending_on_done
+            prev = picture._pending_on_done
             if prev:
-                window._pending_on_done = lambda: (prev(), on_done())
+                picture._pending_on_done = lambda: (prev(), on_done())
             else:
-                window._pending_on_done = on_done
+                picture._pending_on_done = on_done
         return
 
-    window._closing = True
-    window._pending_on_done = on_done
-    window._anim_gen += 1
-    gen = window._anim_gen
+    picture._closing = True
+    picture._pending_on_done = on_done
+    picture._anim_gen += 1
+    gen = picture._anim_gen
 
     def fire_pending():
-        cb = window._pending_on_done
-        window._pending_on_done = None
+        cb = picture._pending_on_done
+        picture._pending_on_done = None
         if cb:
             cb()
 
-    if window._blur_frames and len(window._blur_frames) > 1:
-        reversed_frames = list(reversed(window._blur_frames))
+    if picture._blur_frames and len(picture._blur_frames) > 1:
+        reversed_frames = list(reversed(picture._blur_frames))
         # Reverse the easing — close starts fast, slows at end
         intervals = list(reversed(_ease_in_intervals(_CLOSE_DURATION_MS, len(reversed_frames))))
-        _play_frame(window, reversed_frames, 0, gen, intervals, fire_pending)
+        _play_frame(picture, reversed_frames, 0, gen, intervals, fire_pending)
     else:
         fire_pending()
 
 
-def _play_frame(window, frames, idx, gen, intervals, on_done):
+def _play_frame(picture, frames, idx, gen, intervals, on_done):
     """Display a single animation frame, schedule the next one.
 
     Used for close animation (open uses streaming instead).
     """
-    if window._anim_gen != gen:
+    if picture._anim_gen != gen:
         return False
 
-    _display_frame(window, frames[idx])
+    _display_frame(picture, frames[idx])
 
     if idx + 1 < len(frames):
         delay = intervals[idx] if idx < len(intervals) else intervals[-1]
-        GLib.timeout_add(delay, _play_frame, window, frames,
+        GLib.timeout_add(delay, _play_frame, picture, frames,
                          idx + 1, gen, intervals, on_done)
     elif on_done:
         delay = intervals[-1] if intervals else 30

@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Run ruff check
+        run: ruff check launcher/
+
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install runtime + test deps
+        run: |
+          python -m pip install --upgrade pip
+          # Headless suite — uses Pattern-1/Pattern-2 module mocks for ignis/gi.
+          # These are the only deps the SUT actually imports under test.
+          pip install pytest toml loguru Pillow simpleeval rapidfuzz
+      - name: Run tests
+        run: pytest tests/ -v --tb=short

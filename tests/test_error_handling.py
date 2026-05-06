@@ -5,57 +5,17 @@ Verifies graceful degradation when things go wrong:
 - Corrupt database
 - Missing files
 - Invalid expressions
+
+Ignis/GTK module mocks are installed by conftest.py.
 """
 
 import sqlite3
-import sys
 import time
-import types
 from unittest.mock import MagicMock
 
 import pytest
 
-# Save and patch GObject/Ignis modules for headless testing
-_saved_modules = {}
-_modules_to_fake = ["gi", "gi.repository", "gi.repository.GObject",
-                     "ignis", "ignis.base_service"]
-for _mod in _modules_to_fake:
-    if _mod in sys.modules:
-        _saved_modules[_mod] = sys.modules[_mod]
-
-_fake_gi = types.ModuleType("gi")
-_fake_gi_repo = types.ModuleType("gi.repository")
-_fake_gobject = MagicMock()
-_fake_gobject.SignalFlags.RUN_FIRST = 0
-_fake_gi_repo.GObject = _fake_gobject
-_fake_gi.repository = _fake_gi_repo
-
-_fake_ignis = types.ModuleType("ignis")
-_fake_base_service = types.ModuleType("ignis.base_service")
-
-
-class _FakeBaseService:
-    def __init__(self):
-        pass
-    def emit(self, *args, **kwargs):
-        pass
-
-_fake_base_service.BaseService = _FakeBaseService
-_fake_ignis.base_service = _fake_base_service
-
-sys.modules["gi"] = _fake_gi
-sys.modules["gi.repository"] = _fake_gi_repo
-sys.modules["gi.repository.GObject"] = _fake_gobject
-sys.modules["ignis"] = _fake_ignis
-sys.modules["ignis.base_service"] = _fake_base_service
-
 from services.frecency import FrecencyService
-
-for _mod in _modules_to_fake:
-    if _mod in _saved_modules:
-        sys.modules[_mod] = _saved_modules[_mod]
-    elif _mod in sys.modules:
-        del sys.modules[_mod]
 
 
 def _make_service(db_path):

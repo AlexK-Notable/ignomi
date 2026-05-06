@@ -78,18 +78,17 @@ class SearchPanel:
         self._debounce_timer = None
         self._closing = False
 
-    def create_window(self):
+    def create_widget(self):
         """
-        Create the search panel window.
+        Create the search panel widget tree wrapped in its own Revealer.
 
-        The search panel uses a GTK Revealer for open/close animation
-        (crossfade). Edge-anchored panels (bookmarks, frequent) use
-        Hyprland layerrules, but the centered search panel drifts
-        laterally with compositor slide animations — GTK Revealer
-        gives us full control.
+        Used by RootPanel to compose a single Layer Shell window. The
+        Revealer (crossfade) is owned by the search panel itself because
+        the centered surface needs an animation that is independent of
+        the rest of the launcher (historical: see animation-architecture.md).
 
         Returns:
-            widgets.Window positioned at top center
+            widgets.Box — the centered search panel with its Revealer
         """
         self.search_entry = widgets.Entry(
             placeholder_text="Search applications...",
@@ -122,8 +121,6 @@ class SearchPanel:
             ]
         )
 
-        # Revealer nested INSIDE the centering box so it clips within
-        # the content's own height, not the full window height.
         self._revealer = widgets.Revealer(
             transition_type="crossfade",
             transition_duration=200,
@@ -131,48 +128,50 @@ class SearchPanel:
             child=panel_content,
         )
 
-        # Centering wrapper — stays centered regardless of Revealer state
-        centered = widgets.Box(
+        # Centering wrapper — stays centered regardless of Revealer state.
+        # halign+valign center this widget within the parent Overlay slot.
+        return widgets.Box(
             vertical=True,
             vexpand=True,
+            hexpand=True,
+            halign="center",
             valign="center",
+            margin_top=8,
+            margin_bottom=8,
             child=[self._revealer],
         )
 
-        window = widgets.Window(
-            namespace="ignomi-search",
-            css_classes=["ignomi-window"],
-            monitor=get_monitor_under_cursor(),
-            anchor=["top", "bottom"],
-            default_width=600,
-            exclusivity="ignore",
-            kb_mode="on_demand",
-            layer="overlay",
-            visible=False,
-            margin_top=8,
-            margin_bottom=8,
-            child=centered,
-        )
+    def attach_keyboard_controller(self, window):
+        """Wire the CAPTURE-phase keyboard controller to the root window.
 
-        # Keyboard controller in CAPTURE phase to intercept arrows
+        Called by RootPanel after constructing the single Layer Shell
+        window. The controller is on the WINDOW (not the search widget)
+        so arrow keys are intercepted regardless of which panel has focus.
+        """
         key_controller = Gtk.EventControllerKey()
         key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect("key-pressed", self._on_key_press)
         window.add_controller(key_controller)
 
-        window.connect("notify::visible", self._on_visibility_changed)
+    def set_revealed(self, revealed: bool):
+        """RootPanel calls this when the launcher window opens/closes."""
+        if revealed:
+            self._revealer.set_reveal_child(True)
+            rows = self.results_box.rows
+            if rows:
+                self.results_box.select_row(rows[0])
+            GLib.timeout_add(300, self._grab_entry_focus)
+        else:
+            # Close guard: prevent set_text("") from triggering a new search
+            self._closing = True
+            self.search_entry.set_text("")
+            self._closing = False
+            self._revealer.set_reveal_child(False)
 
-        # Hide window the instant revealer animation completes (no lingering tail)
-        self._revealer.connect("notify::child-revealed", self._on_child_revealed)
-
-        return window
-
-    def _on_child_revealed(self, revealer, param):
-        """Hide window immediately when unreveal animation finishes."""
-        if not revealer.get_child_revealed():
-            window = revealer.get_root()
-            if window:
-                window.set_visible(False)
+    @property
+    def revealer(self):
+        """Expose the Revealer so RootPanel can chain notify::child-revealed."""
+        return self._revealer
 
     def _on_search_changed(self):
         """Debounced search — waits 120ms after last keystroke."""
@@ -270,29 +269,6 @@ class SearchPanel:
         elif result.app:
             close_delay = self.settings["launcher"]["close_delay_ms"]
             launch_app(result.app, self.frecency, close_delay)
-
-    PANEL_WIDTH = 600
-
-    def _on_visibility_changed(self, window, param):
-        """Handle visibility changes — reveal on open, clear on close."""
-        if window.get_visible():
-            # Monitor set by toggle_launcher() before visibility
-
-            # Reveal content with crossfade animation
-            self._revealer.set_reveal_child(True)
-
-            rows = self.results_box.rows
-            if rows:
-                self.results_box.select_row(rows[0])
-
-            GLib.timeout_add(300, self._grab_entry_focus)
-        else:
-            # Close guard: prevent set_text("") from triggering a new search
-            self._closing = True
-            self.search_entry.set_text("")
-            self._closing = False
-            # Reset revealer for next open (window is already hidden)
-            self._revealer.set_reveal_child(False)
 
     def _grab_entry_focus(self):
         """
