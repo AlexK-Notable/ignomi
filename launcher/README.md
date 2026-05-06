@@ -8,48 +8,66 @@ The `launcher/` package implements a multi-panel application launcher with three
 
 The panels are:
 - **Bookmarks** (left) -- user-curated favorites with drag-and-drop reordering
-- **Search** (center) -- real-time app filtering with keyboard navigation
+- **Search** (center) -- pluggable query router (apps, calculator, web, custom commands, system controls)
 - **Frequent** (right) -- apps ranked by a Firefox-style frecency algorithm
+
+A fourth, non-interactive overlay -- the **backdrop** -- sits behind the panels and renders an animated screenshot-based blur of the desktop while the launcher is open.
 
 ## Package Structure
 
 ```
 launcher/
-├── config.py              # Entry point -- creates panels, loads CSS
+├── config.py              # Entry point — creates backdrop + panels, loads CSS
 ├── __init__.py            # Package metadata (__version__)
 ├── panels/                # Panel UI implementations
 │   ├── __init__.py        # Exports: BookmarksPanel, SearchPanel, FrequentPanel
+│   ├── backdrop.py        # Full-screen animated-blur overlay (PIL pipeline)
 │   ├── bookmarks.py       # Left panel: bookmarks with drag-drop
-│   ├── search.py          # Center panel: search + keyboard nav
+│   ├── search.py          # Center panel: search entry + query router
 │   └── frequent.py        # Right panel: frecency-ranked apps
+├── search/                # Query routing layer (see search/README.md)
+│   ├── __init__.py        # Exports: QueryRouter, ResultItem, SearchHandler
+│   ├── router.py          # Router + dataclass + Protocol
+│   └── handlers/          # Five built-in handlers
+│       ├── __init__.py
+│       ├── app_search.py        # priority 1000 — fallback
+│       ├── calculator.py        # priority 100  — "=" prefix
+│       ├── commands.py          # priority 300  — "!" prefix
+│       ├── controls.py          # priority 50   — vol/brightness keywords
+│       └── web_search.py        # priority 200  — "?" / "g:" / "w:" / "gh:" / "yt:"
 ├── services/              # Backend logic
 │   ├── __init__.py        # Exports: FrecencyService
 │   └── frecency.py        # SQLite-backed frecency tracking
 ├── utils/                 # Shared helpers
-│   ├── __init__.py        # Exports: launch_app, close_launcher, load_settings
-│   └── helpers.py         # App launch, bookmarks I/O, monitor detection
+│   ├── __init__.py        # Re-exports helpers (see Utility table below)
+│   └── helpers.py         # App launch, bookmarks I/O, monitor detection, toggle
 ├── data/                  # Runtime configuration
-│   ├── bookmarks.json     # Bookmarked app IDs (auto-saved on changes)
-│   └── settings.toml      # Panel dimensions, close delay, frecency limits
+│   ├── bookmarks.json     # Seed bookmarks (copied to XDG path on first run)
+│   ├── commands.toml      # User-defined "!" commands
+│   └── settings.toml      # [launcher] [frecency] [search] [animation] sections
 └── styles/                # GTK4 CSS
     ├── main.css           # Layout, animations, component styles
-    └── colors.css         # Symlink -> Wallust-generated color definitions
+    └── colors.css         # Symlink → Wallust-generated color definitions
 ```
 
 ## Entry Point
 
 **`config.py`** is symlinked to `~/.config/ignis/config.py` and is loaded by the Ignis daemon on startup. It:
 
-1. Adds the launcher directory to `sys.path` (resolves symlinks for worktree support)
-2. Loads CSS files (`colors.css` then `main.css`) at "user" priority (800) to override global GTK4 styles
-3. Instantiates all three panel classes
-4. Calls `create_window()` on each, producing three `widgets.Window` instances
-5. Stores panel references on window objects for cross-panel communication
+1. Configures `loguru` to log warnings to stderr and debug-level lines to `~/.local/share/ignomi/ignomi.log` (rotated at 1 MB, 3 retained)
+2. Adds the launcher directory to `sys.path` (resolves symlinks for worktree support)
+3. Loads CSS files (`colors.css` then `main.css`) at "user" priority (800) to override global GTK4 styles
+4. Creates the backdrop window via `create_backdrop_window()`
+5. Instantiates all three panel classes and calls `create_window()` on each
+6. Stores panel references on window objects (`window.panel = panel`) for cross-panel communication
 
 ```python
+from panels.backdrop import create_backdrop_window
 from panels.bookmarks import BookmarksPanel
 from panels.search import SearchPanel
 from panels.frequent import FrequentPanel
+
+backdrop_window = create_backdrop_window()
 
 bookmarks_panel = BookmarksPanel()
 search_panel = SearchPanel()
@@ -61,6 +79,8 @@ frequent_window = frequent_panel.create_window()
 
 # Cross-panel access: window.panel gives back the Panel instance
 bookmarks_window.panel = bookmarks_panel
+search_window.panel = search_panel
+frequent_window.panel = frequent_panel
 ```
 
 ## Key Components
@@ -79,7 +99,7 @@ window = panel.create_window()  # widgets.Window anchored left
 panel.refresh_from_disk()
 ```
 
-- Loads app IDs from `data/bookmarks.json` on init
+- Loads app IDs from the XDG bookmarks file (see [`data/bookmarks.json`](#databookmarksjson) below)
 - Right-click context menu to remove bookmarks
 - GTK4 drag-and-drop reordering (`Gtk.DragSource` / `Gtk.DropTarget`)
 - Auto-saves bookmark order changes to disk
@@ -95,12 +115,14 @@ panel = SearchPanel()
 window = panel.create_window()  # widgets.Window anchored top+bottom
 ```
 
-- Uses `ApplicationsService.search()` for real-time filtering
+- Owns a `QueryRouter` with five registered handlers (see [`search/README.md`](search/README.md))
+- 120 ms debounced input
 - Keyboard navigation: Up/Down arrows, Enter to launch, Escape to close
-- Arrow keys intercepted in CAPTURE phase to prevent GTK focus stealing
-- Auto-focuses search entry by moving cursor via `hyprctl dispatch movecursor`
+- Arrow keys intercepted in `Gtk.PropagationPhase.CAPTURE` to prevent GTK focus stealing
+- Auto-focuses the entry by issuing a Hyprland `dispatch movecursor X Y` IPC command via `HyprlandService.send_command(...)`
 - First result auto-selected for fast keyboard launching
-- Right-click to add apps to bookmarks (triggers bookmarks panel refresh)
+- Right-click on app rows adds to bookmarks (triggers bookmarks panel refresh)
+- Uses a GTK `Revealer` for open/close crossfade — the centered surface drifts laterally with Hyprland slide animations, so the panel handles its own transition
 
 ### FrequentPanel (`panels/frequent.py`)
 
@@ -117,6 +139,25 @@ window = panel.create_window()  # widgets.Window anchored right
 - Shows launch count badge per app
 - Right-click context menu: remove from frequents, add to bookmarks
 - Empty state message when no usage data exists
+
+### Backdrop (`panels/backdrop.py`)
+
+Full-screen non-interactive layer that renders an animated blur of the desktop behind the launcher panels.
+
+```python
+from panels.backdrop import create_backdrop_window
+
+backdrop_window = create_backdrop_window()  # widgets.Window with namespace="ignomi-backdrop"
+```
+
+- Captures the current monitor with `grim` (PPM format) on every show
+- Generates 7 progressively-blurred frames in a `ThreadPoolExecutor` using PIL `GaussianBlur`
+- Streams frames into a `GdkPixbuf` → `Gdk.Texture` and swaps them on the GTK main loop
+- Open animation: sharp → full blur with quadratic ease-in (~150 ms)
+- Close animation: full blur → sharp (cached frames, reverse playback) before hiding
+- Per-monitor settings (radius, brightness) via the `_MONITOR_SETTINGS` dict at the top of `backdrop.py`
+- A `_start_close_animation` callable is attached to the window so `close_launcher()` can request the reverse animation
+- **PIL is not thread-safe** — each worker receives its own `Image.frombytes()` copy
 
 ### FrecencyService (`services/frecency.py`)
 
@@ -145,13 +186,35 @@ Shared functions used across all panels.
 | Function | Purpose |
 |----------|---------|
 | `launch_app(app, frecency_service, close_delay_ms)` | Launch app, record frecency, schedule auto-close |
-| `close_launcher()` | Hide all `ignomi-*` windows |
-| `load_settings()` | Load `data/settings.toml` with defaults |
-| `get_monitor_under_cursor()` | Detect monitor at cursor position (Hyprland + GTK) |
-| `load_bookmarks()` / `save_bookmarks(ids)` | Read/write `data/bookmarks.json` |
+| `close_launcher()` | Hide all `ignomi-*` windows; backdrop reverses its blur, search runs the Revealer crossfade, others snap closed |
+| `toggle_launcher()` | **Canonical entry point** for the keybind. Single Ignis-process function: detect cursor monitor, set `window.monitor` on every panel, then toggle visibility. Required because wlr-layer-shell binds the surface to the monitor at creation time |
+| `load_settings()` | Load `data/settings.toml` (cached) and deep-merge with built-in defaults |
+| `load_bookmarks()` / `save_bookmarks(ids)` | Read/write bookmarks JSON (atomic via tmp + rename) |
 | `add_bookmark(app_id)` / `remove_bookmark(app_id)` | Modify bookmarks list |
 | `is_bookmarked(app_id)` | Check if app is bookmarked |
-| `hyprland_monitor_to_ignis_monitor(id)` | Translate Hyprland monitor ID to GTK monitor index |
+| `add_bookmark_with_refresh(app_id, button=None)` | Add bookmark, pulse the triggering button, then call `refresh_from_disk()` on the bookmarks panel |
+| `get_monitor_under_cursor()` | Detect the GTK monitor index where the cursor currently sits, via `HyprlandService` IPC |
+| `hyprland_monitor_to_ignis_monitor(id)` | Translate a Hyprland monitor ID into a GTK monitor index |
+| `clear_container(container)` | GTK4 helper: remove every child of a widget that exposes `get_first_child` / `remove` |
+| `find_app_by_id(app_id)` | Look up an `Application` object by desktop-file ID via `ApplicationsService` |
+
+#### Monitor detection — `HyprlandService`, not subprocess
+
+Both `get_monitor_under_cursor()` and `hyprland_monitor_to_ignis_monitor()` route through `HyprlandService.send_command(...)` rather than `subprocess.run(["hyprctl", ...])`:
+
+```python
+# helpers.py — inside get_monitor_under_cursor
+from ignis.services.hyprland import HyprlandService
+
+hyprland = HyprlandService.get_default()
+cursor_raw = hyprland.send_command("cursorpos").strip()  # "x, y"
+for monitor in hyprland.monitors:                          # cached list
+    if (monitor.x <= cursor_x < monitor.x + monitor.width
+            and monitor.y <= cursor_y < monitor.y + monitor.height):
+        return _hyprland_name_to_ignis_index(monitor.name)
+```
+
+The `HyprlandService` import lives **inside** the function (not at module top) so that the helper module can be imported in test contexts without an active Hyprland socket. Earlier code shelled out to `hyprctl cursorpos` and `hyprctl monitors -j`; that path has been removed.
 
 ## Cross-Panel Communication
 
@@ -166,10 +229,11 @@ self.frecency.connect("changed", lambda x: self._refresh_apps())
 ```
 
 ### 2. Direct Panel Access
-When the search panel adds a bookmark, it reaches into the bookmarks panel to trigger a refresh:
+When the search panel adds a bookmark, `add_bookmark_with_refresh()` reaches into the bookmarks panel to trigger a refresh:
 
 ```python
-# In SearchPanel._on_right_click()
+# In utils/helpers.py
+from ignis.app import IgnisApp
 app_instance = IgnisApp.get_default()
 bookmarks_window = app_instance.get_window("ignomi-bookmarks")
 if bookmarks_window and hasattr(bookmarks_window, 'panel'):
@@ -180,26 +244,34 @@ This works because `config.py` stores panel references as `window.panel` attribu
 
 ### 3. Shared Singletons
 All panels share the same service instances:
-- `ApplicationsService.get_default()` -- Ignis built-in, lists installed apps
-- `get_frecency_service()` -- module-level singleton in `services/frecency.py`
+- `ApplicationsService.get_default()` — Ignis built-in, lists installed apps
+- `get_frecency_service()` — module-level singleton in `services/frecency.py`
+- `HyprlandService.get_default()` — Ignis built-in, used for monitor / cursor IPC
 
 ## Configuration
 
 ### `data/settings.toml`
 
+Live sections (mirror the `defaults` dict in `helpers.load_settings`):
+
 | Section | Key | Type | Default | Description |
 |---------|-----|------|---------|-------------|
 | `launcher` | `close_delay_ms` | int | 300 | Delay before auto-closing after app launch |
-| `panels` | `bookmark_width` | int | 300 | Bookmarks panel width (px) |
-| `panels` | `frequent_width` | int | 300 | Frequent panel width (px) |
-| `panels` | `search_width` | int | 500 | Search panel width (px) |
-| `panels` | `search_height` | int | 600 | Search panel height (px) |
 | `frecency` | `max_items` | int | 12 | Max apps shown in frequent panel |
 | `frecency` | `min_launches` | int | 2 | Minimum launches before appearing |
+| `search` | `max_results` | int | 30 | Maximum results returned by `AppSearchHandler` |
+| `search` | `fuzzy_threshold` | int | 50 | rapidfuzz score cutoff (0-100, higher = stricter); only used when rapidfuzz is installed |
+| `animation` | `transition_duration` | int | 200 | Transition duration in milliseconds for the search-panel `Revealer` |
+
+Panel widths and heights are **hard-coded** in their respective panel modules (`search.py` `default_width=600`; bookmarks/frequent use `min_content_width=280` on their inner Scroll widgets). There is no `[panels]` section.
+
+Per-monitor backdrop blur settings (radius, brightness) live in the `_MONITOR_SETTINGS` dict in `panels/backdrop.py` rather than `settings.toml`.
 
 ### `data/bookmarks.json`
 
-Simple JSON array of desktop file IDs. Auto-saved when bookmarks change:
+> **Seed data.** This file is **copied once** to `~/.local/share/ignomi/bookmarks.json` on the first launch (see `_bookmarks_path()` in `helpers.py` at lines 376-391). After that copy, the in-repo file is unused — all reads and writes go through the XDG path.
+
+JSON shape:
 
 ```json
 {
@@ -209,6 +281,41 @@ Simple JSON array of desktop file IDs. Auto-saved when bookmarks change:
   ]
 }
 ```
+
+To distribute a different default set with the launcher, edit `data/bookmarks.json` *before* the first launch on a fresh machine. To change bookmarks at runtime, use the right-click menus or edit `~/.local/share/ignomi/bookmarks.json` directly and call `panel.refresh_from_disk()` (or restart Ignis).
+
+### `data/commands.toml`
+
+Schema for the `CustomCommandsHandler` (`!` prefix). Each command is a TOML table named `[commands.<id>]`. The handler reads this file once at construction time.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `description` | string | recommended | Shown as the result row's secondary line |
+| `exec` | string | **yes** | Shell command line; runs via `subprocess.Popen(exec_str, shell=True)` |
+| `icon` | string | optional | GTK icon name (defaults to `utilities-terminal`) |
+
+Entries missing the `exec` field are skipped with a warning at load time.
+
+```toml
+# data/commands.toml
+
+[commands.lock]
+description = "Lock screen"
+exec = "hyprlock"
+icon = "system-lock-screen"
+
+[commands.suspend]
+description = "Suspend system"
+exec = "systemctl suspend"
+icon = "system-suspend"
+
+[commands.reload]
+description = "Reload Ignis configuration"
+exec = "goignis reload"
+icon = "view-refresh"
+```
+
+> **Security note.** Because `exec` runs through a user shell with `shell=True`, every command inherits the user's `PATH`, aliases, and environment. The file is local and user-owned — keep it that way; do not source it from untrusted locations.
 
 ### `styles/colors.css`
 
@@ -225,11 +332,38 @@ This pattern exists because GTK4's CSS parser cannot apply `alpha()` to `@define
 
 ## Dependencies
 
-- **ignis** -- Framework providing `widgets`, `IgnisApp`, `ApplicationsService`, `BaseService`
-- **gi.repository (GTK4)** -- `Gtk`, `Gdk`, `GLib`, `GObject` for widget system and event handling
-- **toml** -- Parse `settings.toml`
-- **sqlite3** -- Frecency database (stdlib)
-- **subprocess** -- Shell out to `hyprctl` for monitor/cursor detection
+### Required
+- **ignis** — Framework providing `widgets`, `IgnisApp`, `ApplicationsService`, `BaseService`, `HyprlandService`, `AudioService`, `BacklightService`
+- **gi.repository (GTK4)** — `Gtk`, `Gdk`, `GdkPixbuf`, `GLib`, `GObject` for widget system and event handling
+- **toml** — Parse `settings.toml` and `commands.toml`
+- **loguru** — Structured logging with file rotation (replaces ad-hoc `print()`)
+- **Pillow (PIL)** — `Image`, `ImageEnhance`, `ImageFilter` for backdrop blur frame generation
+- **sqlite3** — Frecency database (Python stdlib)
+- **subprocess** — Used to invoke `grim` (backdrop screenshot), `xdg-open` (web search), `wl-copy` (calculator clipboard), and user-defined commands
+
+### Optional
+- **simpleeval** — Safe expression evaluator for the calculator handler. Without it, `CalculatorHandler.matches()` always returns `False` and `=` queries fall through. Install: `pipx inject ignis simpleeval`
+- **rapidfuzz** — Typo-tolerant fuzzy app search. Without it, `AppSearchHandler` falls back to substring matching via `ApplicationsService.search()`. Install: `pipx inject ignis rapidfuzz`
+
+### External CLI tools (runtime, not Python packages)
+- **grim** — Wayland screenshot tool, used by `backdrop.py`
+- **xdg-open** — URL opener for `WebSearchHandler`
+- **wl-copy** (wl-clipboard) — Clipboard for `CalculatorHandler`
+
+## Testing
+
+Tests live in `tests/` at the project root and run with:
+
+```bash
+pytest tests/ -v
+```
+
+Conventions:
+- Fixtures (`tmp_db`, `tmp_bookmarks`, `tmp_settings`, `tmp_commands`) live in `tests/conftest.py`
+- Handler tests are GTK-free (`test_router.py`, `test_calculator.py`, `test_app_search.py`, `test_commands.py`, `test_web_search.py`)
+- Service / utility tests use `tmp_path` + monkeypatching of `time.time()`, `BaseService.__init__`, and `ApplicationsService.apps`
+
+When adding a new handler, mirror the structure of `tests/test_calculator.py` — instantiate the handler directly and assert on `matches()` / `get_results()`. No display server or Ignis daemon is needed.
 
 ## How to Add a New Panel
 
@@ -254,16 +388,10 @@ class YourPanel:
             visible=False,
             child=widgets.Box(...)
         )
-        # Add visibility handler for monitor detection
-        window.connect("notify::visible", self._on_visibility_changed)
         return window
-
-    def _on_visibility_changed(self, window, param):
-        if window.get_visible():
-            cursor_monitor = get_monitor_under_cursor()
-            if window.monitor != cursor_monitor:
-                window.monitor = cursor_monitor
 ```
+
+> **Do not** add a per-panel `notify::visible` monitor-update handler. `toggle_launcher()` in `utils/helpers.py` sets `window.monitor` on every panel *before* showing them, which is the only reliable point in the wlr-layer-shell lifecycle to do so.
 
 2. Export from `panels/__init__.py`:
 ```python
@@ -279,16 +407,18 @@ your_window = your_panel.create_window()
 your_window.panel = your_panel
 ```
 
-4. Add the window name to `scripts/toggle-launcher.sh`:
-```bash
-ignis toggle-window ignomi-yourpanel &
-```
+4. The toggle script (`scripts/toggle-launcher.sh`) calls `toggle_launcher()` which discovers all windows whose namespace starts with `ignomi-` — no script edit needed.
 
-5. Update `utils/helpers.py` `close_launcher()` -- no change needed since it already closes all windows matching `ignomi-*`.
+5. `close_launcher()` in `utils/helpers.py` will hide your window automatically. If your panel needs a custom close animation, follow the `_close_search_panel` / `_close_backdrop` pattern in `helpers.py` (attach a `_start_close_animation` attribute to the window, then add a branch to `close_launcher`).
+
+## How to Add a New Search Handler
+
+See [`search/README.md`](search/README.md) for the full handler authoring guide.
 
 ## See Also
 
-- [Project README](../README.md) -- Installation, keybinds, usage
-- [Architecture Diagrams](../docs/diagrams/) -- Visual system overview
-- [Design Documents](../project-docs/architecture/) -- Architectural decisions and rationale
-- [CLAUDE.md](../CLAUDE.md) -- Developer reference for working with this codebase
+- [`search/README.md`](search/README.md) — Query router, handler protocol, authoring guide
+- [Project README](../README.md) — Installation, keybinds, usage
+- [Architecture Diagrams](../docs/diagrams/) — Visual system overview
+- [Design Documents](../project-docs/architecture/) — Architectural decisions and rationale
+- [CLAUDE.md](../CLAUDE.md) — Developer reference for working with this codebase

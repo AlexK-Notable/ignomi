@@ -116,8 +116,6 @@ class BookmarksPanel:
             child=content,
         )
 
-        window.connect("notify::visible", self._on_visibility_changed)
-
         return window
 
     def _refresh_app_list(self):
@@ -298,8 +296,3 @@ class BookmarksPanel:
         self.bookmarks = [app for app_id in bookmark_ids
                           if (app := find_app_by_id(app_id))]
         self._refresh_app_list()
-
-    def _on_visibility_changed(self, window, param):
-        """Handle visibility changes — refresh bookmarks on open."""
-        if window.get_visible():
-            pass  # Monitor set by toggle_launcher() before visibility

@@ -1,13 +1,27 @@
 # Ignomi Launcher - Design Document
 **Date:** 2025-11-02
 **Status:** Implemented (all success criteria met)
-**Version:** 2.0
+**Version:** 2.1
 
 > **Document History:** This document was originally written as a pre-implementation
 > specification on 2025-11-02. Updated 2026-02-23 to match the implemented codebase.
 > All code examples, API signatures, CSS patterns, and known limitations have been
 > verified against the actual source files. Where the original spec diverged from
 > implementation decisions made during development, the document now reflects reality.
+
+> **As-of 2025-11-02 with addenda for:**
+> - **Search router** (commit `94b83cf`) — see
+>   [`2026-04-30-search-router-architecture.md`](./2026-04-30-search-router-architecture.md)
+> - **Backdrop blur pipeline** (commit `b460826`) — see
+>   [`2026-04-30-backdrop-blur-pipeline.md`](./2026-04-30-backdrop-blur-pipeline.md)
+> - **Multi-monitor backdrop fix** (commit `857767e`) — covered in the
+>   backdrop pipeline doc (PIL thread safety section)
+> - **Animation architecture reconciliation** (search-panel exception) —
+>   see [`2026-04-30-animation-architecture.md`](./2026-04-30-animation-architecture.md)
+>
+> Where this doc and the addenda disagree, **the addenda are correct**.
+> Sections in this doc that are now obsolete are marked inline with
+> "Updated YYYY-MM-DD" callouts.
 
 ## Executive Summary
 
@@ -30,8 +44,16 @@ Ignomi is a three-panel application launcher built with the Ignis framework (Pyt
 - Custom desktop entry editing
 - Application categories/folders
 - Thumbnail previews
-- Web search integration
 - Plugin system
+
+> **Update 2026-04-30:** "Web search integration" was removed from the
+> non-goals list — it is now implemented. The `WebSearchHandler`
+> (`launcher/search/handlers/web_search.py`, priority 200, registered in
+> `SearchPanel.__init__`) supports `?` (default engine), `g:` (Google),
+> `w:` (Wikipedia), `gh:` (GitHub), and `yt:` (YouTube) prefixes, opening
+> via `xdg-open`. See the
+> [search router architecture doc](./2026-04-30-search-router-architecture.md)
+> for the full handler registry.
 
 ## User Experience Flow
 
@@ -111,39 +133,52 @@ Ignomi is a three-panel application launcher built with the Ignis framework (Pyt
 
 ```python
 # Bookmarks Panel (Left)
+# Updated 2026-04-30 — exclusivity changed from "exclusive" to "ignore",
+# layer changed from "top" to "overlay". This was part of the search-panel
+# drift fix (the centered search panel was destabilized by sibling exclusive
+# zones). See 2026-04-30-animation-architecture.md.
+# Citation: launcher/panels/bookmarks.py:108-110.
 widgets.Window(
     namespace="ignomi-bookmarks",
     monitor=get_monitor_under_cursor(),
     anchor=["left", "top", "bottom"],
-    exclusivity="exclusive",  # Reserves screen space
+    exclusivity="ignore",     # All surfaces "ignore" — no exclusive zones
     kb_mode="on_demand",      # Allow mouse interaction
-    layer="top",
+    layer="overlay",          # Above the backdrop layer
     default_width=320,
     visible=False,
     margin_top=8, margin_bottom=8, margin_left=8
 )
 
 # Search Panel (Center)
+# Updated 2026-04-30 — exclusivity changed from "normal" to "ignore",
+# layer changed from "top" to "overlay". See animation architecture doc
+# for the full rationale (centered surfaces drift laterally when
+# sibling exclusive zones change). Citation: launcher/panels/search.py:140-153.
 widgets.Window(
     namespace="ignomi-search",
     monitor=get_monitor_under_cursor(),
     anchor=["top", "bottom"],
-    exclusivity="normal",     # Floating (doesn't reserve space)
-    kb_mode="on_demand",      # Allow interaction while focused
-    layer="top",
+    exclusivity="ignore",     # Ignore other surfaces' exclusive zones (drift fix)
+    kb_mode="on_demand",
+    layer="overlay",          # Above edge panels' "top" layer
     default_width=600,
     visible=False,
-    margin_top=8, margin_bottom=8
+    margin_top=8, margin_bottom=8,
+    child=centered,           # GTK Revealer wrapped in centering Box (see anim doc)
 )
 
 # Frequent Panel (Right)
+# Updated 2026-04-30 — same migration as bookmarks above:
+# exclusivity "exclusive" → "ignore", layer "top" → "overlay".
+# Citation: launcher/panels/frequent.py:131-133.
 widgets.Window(
     namespace="ignomi-frequent",
     monitor=get_monitor_under_cursor(),
     anchor=["right", "top", "bottom"],
-    exclusivity="exclusive",
+    exclusivity="ignore",
     kb_mode="on_demand",
-    layer="top",
+    layer="overlay",
     default_width=320,
     visible=False,
     margin_top=8, margin_bottom=8, margin_right=8
@@ -151,14 +186,28 @@ widgets.Window(
 ```
 
 **Toggle Behavior:**
+
+> **Update 2026-04-30:** the parallel-toggle approach below was replaced
+> by a single atomic `ignis run-python` call in commit `b460826`. The
+> current `scripts/toggle-launcher.sh` is one line:
+>
+> ```bash
+> ignis run-python "from utils.helpers import toggle_launcher; toggle_launcher()"
+> ```
+>
+> `toggle_launcher()` (in `launcher/utils/helpers.py:175-216`) runs inside
+> the Ignis process: detects the cursor monitor while windows are still
+> hidden, sets `.monitor` on every `ignomi-*` window, then flips
+> visibility. wlr-layer-shell binds the surface's monitor at *creation*,
+> so setting `.monitor` after `set_visible(True)` is too late — the
+> per-panel `update_window_monitor()` approach below was the bug this
+> change fixed. See zk-note `[[20260227T035401098076654606]]` for the
+> full rationale.
+
 - Hyprland keybind: `Mod+Space` runs `scripts/toggle-launcher.sh`
-- Script issues three parallel `ignis toggle-window` commands (one per panel):
-  ```bash
-  ignis toggle-window ignomi-bookmarks &
-  ignis toggle-window ignomi-search &
-  ignis toggle-window ignomi-frequent &
-  ```
-- Each panel's `notify::visible` signal handler updates monitor placement via `get_monitor_under_cursor()`
+- Script issues a single `ignis run-python` call invoking `toggle_launcher()`
+- `toggle_launcher()` sets `.monitor` on all panels **before** flipping
+  visibility (atomic w.r.t. the GTK main loop)
 - Search panel moves cursor to search entry after animation completes (300ms delay)
 
 ### Data Flow
@@ -283,34 +332,56 @@ button.add_controller(drop_target)
 
 ### Search Panel (panels/search.py)
 
-**Responsibility:** Filter and display all installed applications
+**Responsibility:** Dispatch user queries to a priority-ordered router of typed
+search handlers and render the results.
+
+> **Update 2026-04-30:** the panel no longer drives `ApplicationsService.search()`
+> directly. It owns only the input field, results list, keyboard navigation,
+> a 120ms debounce, and a close-guard. All search logic — calculator, web
+> search, custom commands, system controls, and app filtering — lives in
+> `launcher/search/`. See the
+> [search router architecture doc](./2026-04-30-search-router-architecture.md)
+> for the full design.
 
 **Features:**
-- Search Entry widget for user input
-- Real-time filtering via ApplicationsService.search()
-- Display results with icons + labels
-- Right-click to add to bookmarks
-- Keyboard navigation (arrow keys, Enter to launch)
+- Query router dispatches to typed handlers (priority-ordered)
+- 120ms debounce on every keystroke
+- Display results with icons + labels (or inline widgets for handlers like
+  system controls)
+- First row auto-selected after every search
+- Right-click on app results to add to bookmarks
+- Keyboard navigation (arrow keys, Enter to launch, Escape to close)
 
-**Search Implementation:**
+**Search Implementation (current shape — see `launcher/panels/search.py:92-99`):**
+
 ```python
-self.entry = Widget.Entry(
+self.search_entry = widgets.Entry(
     placeholder_text="Search applications...",
-    on_change=lambda x: self._on_search()
+    css_classes=["search-entry"],
+    on_change=lambda x: self._on_search_changed(),
 )
+self.search_entry.connect("activate", lambda entry: self._on_entry_activate())
 
-def _on_search(self):
-    query = self.entry.text
-    if query:
-        results = self.apps_service.search(
-            self.apps_service.apps,
-            query
-        )
-    else:
-        results = self.apps_service.apps[:20]  # Default top 20
+def _on_search_changed(self):
+    """Debounced search — waits 120ms after last keystroke."""
+    if self._closing:
+        return
+    if self._debounce_timer is not None:
+        GLib.source_remove(self._debounce_timer)
+    self._debounce_timer = GLib.timeout_add(120, self._do_search)
 
-    self._update_results_display(results)
+def _do_search(self):
+    """Execute the actual search query (called after debounce)."""
+    self._debounce_timer = None
+    query = self.search_entry.text if self.search_entry else ""
+    self.current_handler, self.current_results = self.router.route(query)
+    self._update_results()
+    return False  # Don't repeat GLib timeout
 ```
+
+The `widgets.Entry` `on_change`/`activate` pair replaces the older
+`Widget.Entry` + ad-hoc `_on_search` shown in earlier revisions of this
+document.
 
 ### Frequent Panel (panels/frequent.py)
 
@@ -356,15 +427,64 @@ def _close_launcher_callback() -> bool:
     """Callback for GLib.timeout_add."""
     close_launcher()
     return False  # Don't repeat
+```
 
+**Close Launcher (current — `launcher/utils/helpers.py:250-293`, ~lines 250-280):**
+
+> **Update 2026-04-30:** `close_launcher()` is no longer a simple
+> `set_visible(False)` loop over all `ignomi-*` windows. It now special-cases
+> two namespaces:
+>
+> - **`ignomi-backdrop`** — runs the reverse-blur animation
+>   (`window._start_close_animation`, exported by `panels/backdrop.py`)
+>   before hiding. See
+>   [backdrop blur pipeline doc](./2026-04-30-backdrop-blur-pipeline.md).
+> - **`ignomi-search`** — calls `revealer.set_reveal_child(False)` to
+>   trigger the GTK Revealer crossfade. The Revealer's
+>   `notify::child-revealed` signal hides the window when the animation
+>   completes. See
+>   [animation architecture doc](./2026-04-30-animation-architecture.md).
+> - **Bookmarks / frequent** — fall through to `set_visible(False)`;
+>   Hyprland layerrules handle their slide animations.
+
+```python
 def close_launcher():
-    """Close all ignomi windows."""
+    """Close all Ignomi launcher windows including backdrop.
+
+    Backdrop: reverse blur animation, then hide.
+    Search panel: GTK Revealer crossfade, then hide.
+    Bookmarks/frequent: Hyprland layerrules handle slide animation.
+    """
     from ignis.app import IgnisApp
     app = IgnisApp.get_default()
 
     for window in app.get_windows():
         if window.namespace and window.namespace.startswith("ignomi-"):
-            window.set_visible(False)  # GTK4/Ignis visibility API
+            if window.namespace == "ignomi-backdrop":
+                _close_backdrop(window)
+            elif window.namespace == "ignomi-search":
+                _close_search_panel(window)
+            else:
+                window.set_visible(False)
+
+
+def _close_backdrop(window):
+    """Close backdrop with reverse blur animation, then hide."""
+    if hasattr(window, '_start_close_animation'):
+        window._start_close_animation(lambda: window.set_visible(False))
+    else:
+        window.set_visible(False)
+
+
+def _close_search_panel(window):
+    """Close the search panel with GTK Revealer animation."""
+    centering_box = window.get_child()
+    if centering_box:
+        revealer = centering_box.get_first_child()
+        if revealer and hasattr(revealer, 'set_reveal_child'):
+            revealer.set_reveal_child(False)
+            return
+    window.set_visible(False)
 ```
 
 ## Styling & Theming

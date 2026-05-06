@@ -139,8 +139,6 @@ class FrequentPanel:
             child=content,
         )
 
-        window.connect("notify::visible", self._on_visibility_changed)
-
         return window
 
     def _refresh_apps(self):
@@ -274,8 +272,3 @@ class FrequentPanel:
     def _add_to_bookmarks(self, app, button):
         """Add app to bookmarks."""
         add_bookmark_with_refresh(app.id, button)
-
-    def _on_visibility_changed(self, window, param):
-        """Handle visibility changes."""
-        if window.get_visible():
-            pass  # Monitor set by toggle_launcher() before visibility

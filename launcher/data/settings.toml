@@ -22,3 +22,21 @@ fuzzy_threshold = 50
 [animation]
 # Transition duration in milliseconds for panel reveal animations
 transition_duration = 200
+
+[web_search.engines]
+# Web search engines available via prefix triggers in the search panel.
+#
+# Each entry maps a prefix (the literal string typed before the query) to
+# an inline table with name, url, and optional icon. The {query} token in
+# `url` is URL-encoded and substituted with the user's text.
+#
+# Customising this section REPLACES the defaults entirely — re-add any
+# entries you want to keep.
+#
+# If this section is omitted, built-in defaults (Kagi/Google/Wikipedia/
+# GitHub/YouTube) are used.
+"?"   = { name = "Kagi",      url = "https://kagi.com/search?q={query}",                    icon = "web-browser" }
+"g:"  = { name = "Google",    url = "https://www.google.com/search?q={query}",              icon = "web-browser" }
+"w:"  = { name = "Wikipedia", url = "https://en.wikipedia.org/w/index.php?search={query}",  icon = "accessories-dictionary" }
+"gh:" = { name = "GitHub",    url = "https://github.com/search?q={query}",                  icon = "web-browser" }
+"yt:" = { name = "YouTube",   url = "https://www.youtube.com/results?search_query={query}", icon = "applications-multimedia" }

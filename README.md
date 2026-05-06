@@ -111,6 +111,23 @@ bindd = $mainMod, SPACE, Launch Ignomi three-panel launcher, exec, ~/repos/ignom
 - **Launch App:** Click any app from any panel
 - **Close:** Press `Escape` or wait for auto-close (0.3s after launch)
 
+### Search Prefixes
+
+The center panel routes your query to one of several handlers based on a
+short prefix or keyword:
+
+| Type | Trigger | Example | What it does |
+|------|---------|---------|--------------|
+| App search | (none) | `firefox` | Filter installed applications (fuzzy when `rapidfuzz` is installed) |
+| Calculator | `=` | `= sqrt(16) * 2` | Evaluate the expression and copy the result to the clipboard on Enter |
+| Web search | `?`, `g:`, `w:`, `gh:`, `yt:` | `? wayland layer shell` | Open the result in your default browser via `xdg-open` |
+| Custom command | `!` | `!lock` | Run a user-defined shell command from `launcher/data/commands.toml` |
+| System controls | `vol`, `volume`, `bright`, `brightness`, `mute` | `vol` | Render an inline volume / brightness slider |
+
+See [`launcher/search/README.md`](launcher/search/README.md) for the full
+handler reference and `launcher/data/commands.toml` for the custom-command
+schema.
+
 ### Managing Bookmarks
 
 - **Add to Bookmarks:** Right-click app in search/frequent panels
@@ -127,8 +144,9 @@ what the Hyprland keybind calls:
 ~/repos/ignomi/scripts/toggle-launcher.sh
 ```
 
-Each panel detects the cursor's monitor when it becomes visible, so the launcher
-always appears where your cursor is.
+The toggle script detects the cursor's monitor and assigns it to every
+panel before showing them, so the launcher always appears where your
+cursor is.
 
 ### Manual Frecency Tracking
 
@@ -146,18 +164,23 @@ Edit `launcher/data/settings.toml`:
 
 ```toml
 [launcher]
-close_delay_ms = 300  # Auto-close delay after launch
-
-[panels]
-bookmark_width = 300
-frequent_width = 300
-search_width = 500
-search_height = 600
+close_delay_ms = 300       # Auto-close delay after launch (ms)
 
 [frecency]
-max_items = 12  # Apps shown in frequent panel
-min_launches = 2  # Minimum launches before showing
+max_items = 12             # Apps shown in frequent panel
+min_launches = 2           # Minimum launches before appearing
+
+[search]
+max_results = 30           # Max results for app search
+fuzzy_threshold = 50       # rapidfuzz score cutoff (0-100, higher = stricter)
+
+[animation]
+transition_duration = 200  # Search-panel reveal/crossfade duration (ms)
 ```
+
+Panel widths are hard-coded in the panel modules (no `[panels]` section).
+For per-monitor backdrop blur tuning, edit `_MONITOR_SETTINGS` near the
+top of `launcher/panels/backdrop.py`.
 
 ### Initial Bookmarks
 
@@ -204,22 +227,28 @@ ignomi/
 ├── launcher/                # Launcher implementation
 │   ├── config.py            # Main Ignis entry point
 │   ├── panels/              # Panel implementations
+│   │   ├── backdrop.py      # Animated screenshot-based blur overlay
 │   │   ├── bookmarks.py     # Bookmarks panel (left)
 │   │   ├── search.py        # Search panel (center)
 │   │   └── frequent.py      # Frequent apps panel (right)
+│   ├── search/              # Pluggable query routing layer
+│   │   ├── router.py        # QueryRouter, ResultItem, SearchHandler
+│   │   └── handlers/        # 5 built-in handlers (apps, calc, web, cmd, ctrls)
 │   ├── services/            # Backend services
 │   │   └── frecency.py      # Frecency tracking + SQLite
 │   ├── utils/               # Helper functions
-│   │   └── helpers.py       # App launching, bookmarks, monitor detection
+│   │   └── helpers.py       # App launching, bookmarks, monitor detection, toggle
 │   ├── data/                # Configuration files
-│   │   ├── bookmarks.json   # User bookmarks (auto-saved)
-│   │   └── settings.toml    # Panel dimensions, frecency config
+│   │   ├── bookmarks.json   # Seed bookmarks (copied to XDG path on first run)
+│   │   ├── commands.toml    # User-defined `!` commands
+│   │   └── settings.toml    # [launcher] [frecency] [search] [animation] sections
 │   └── styles/              # CSS styling
 │       ├── main.css         # Layout, colors, animations
 │       └── colors.css       # Symlink to Wallust-generated colors
 ├── scripts/                 # Utility scripts
 │   ├── toggle-launcher.sh   # Toggle all three panels (used by keybind)
 │   └── track-launch.sh      # Manual frecency tracking
+├── tests/                   # pytest suite (handlers, frecency, settings, bookmarks)
 ├── docs/                    # Architecture diagrams
 ├── project-docs/            # Design docs, research, discoveries
 └── README.md
@@ -268,9 +297,23 @@ hyprctl binds | grep ignomi
 
 ### Panels overlap incorrectly
 
-Monitor selection is automatic -- each panel calls `get_monitor_under_cursor()` from
-`launcher/utils/helpers.py` to detect which monitor the cursor is on when the launcher
-opens. If panels land on the wrong monitor:
+Monitor selection is automatic. The toggle script calls `toggle_launcher()`
+in `launcher/utils/helpers.py`, which uses `get_monitor_under_cursor()` to
+detect the cursor's monitor and assigns `window.monitor` on every panel
+*before* showing them (required by `wlr-layer-shell`, which binds the
+surface to its monitor at creation time).
+
+At runtime, monitor and cursor data is fetched via Ignis IPC:
+
+```python
+# launcher/utils/helpers.py
+hyprland = HyprlandService.get_default()
+cursor_raw = hyprland.send_command("cursorpos").strip()  # "x, y"
+for monitor in hyprland.monitors:
+    ...
+```
+
+The same information is available from the command line for debugging:
 
 ```bash
 # Verify Hyprland sees your monitors
@@ -280,8 +323,9 @@ hyprctl monitors -j
 hyprctl cursorpos
 ```
 
-The monitor is re-detected every time the panels become visible, so moving
-your cursor to the desired monitor before pressing the keybind is sufficient.
+If the CLI commands return correct values but the panels still land on
+the wrong monitor, restart Ignis (`ignis quit && ignis init &`) — stale
+monitor data after a hotplug event is the most common cause.
 
 ### Frecency not updating
 

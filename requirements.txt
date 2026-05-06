@@ -1,0 +1,20 @@
+# Ignomi launcher Python dependencies (inject into the Ignis venv).
+#
+# Install:
+#   pipx inject ignis -r requirements.txt
+#
+# Required deps for full functionality:
+loguru
+toml
+Pillow
+
+# Optional deps (handlers degrade gracefully if missing):
+#
+# simpleeval — Calculator handler (= prefix). Pinned >=1.0.5 for CVE-2026-32640
+# (Sandbox Escape via Dangerous Object Leakage). The launcher's current bindings
+# are not exploitable under that CVE, but pinning makes safety intentional rather
+# than accidental — and protects against future binding additions.
+simpleeval>=1.0.5
+
+# rapidfuzz — AppSearchHandler fuzzy match (no version constraint required).
+rapidfuzz

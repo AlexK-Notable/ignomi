@@ -157,21 +157,6 @@ def add_bookmark_with_refresh(app_id: str, button=None) -> None:
         bookmarks_window.panel.refresh_from_disk()
 
 
-def update_window_monitor(window) -> None:
-    """
-    Update a window's monitor to match the cursor's current position.
-
-    Call this in visibility-changed handlers to ensure panels
-    appear on the correct monitor.
-
-    Args:
-        window: An Ignis Window widget
-    """
-    cursor_monitor = get_monitor_under_cursor()
-    if window.monitor != cursor_monitor:
-        window.monitor = cursor_monitor
-
-
 def toggle_launcher():
     """
     Toggle all Ignomi launcher panels with correct multi-monitor placement.
@@ -184,8 +169,9 @@ def toggle_launcher():
     2. Set ``.monitor`` on every window
     3. Then toggle visibility
 
-    This replaces per-panel ``update_window_monitor()`` calls in visibility
-    handlers, which fire too late (after the surface is already created).
+    This replaces a previous per-panel approach where each visibility handler
+    rebound `window.monitor` — that fired too late, after the surface was
+    already created against the old monitor.
     """
     from ignis.app import IgnisApp
 

@@ -108,8 +108,8 @@ window {
 - **Panels**: 65% opacity dark backgrounds (`@bg_65`, currently #292420) with blur
 - **Text**: Light foreground (#D6E1EC) for readability
 - **Accent**: Orange (#B17344) from autumn foliage in wallpaper
-- **Borders**: Subtle accent-colored outlines (30% opacity)
-- **Depth**: Shadow effects for floating appearance
+- **Borders**: None — minimal-frame aesthetic (`main.css:39` `border: none`); accent-colored outlines were tested and removed (see line 26)
+- **Depth**: Provided by compositor blur and panel translucency, not by `box-shadow` (`main.css:40` `box-shadow: none`)
 - **Interactions**: Color-shifting hover states, focus glow effects
 
 ### Color Palette Source

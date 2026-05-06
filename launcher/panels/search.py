@@ -56,7 +56,9 @@ class SearchPanel:
         self.router = QueryRouter()
         self.router.register(SystemControlsHandler())   # 50: system controls
         self.router.register(CalculatorHandler())        # 100: math expressions
-        self.router.register(WebSearchHandler())         # 200: web search
+        self.router.register(WebSearchHandler(           # 200: web search
+            engines=self.settings.get("web_search", {}).get("engines") or None,
+        ))
         self.router.register(CustomCommandsHandler())    # 300: custom commands
         self.router.register(AppSearchHandler(           # 1000: app search (fallback)
             max_results=search_settings.get("max_results", 30),

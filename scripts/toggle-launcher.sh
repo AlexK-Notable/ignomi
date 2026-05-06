@@ -6,4 +6,4 @@
 # at surface creation time — we must set window.monitor BEFORE toggling
 # visibility, which can only be done from within the process.
 
-ignis run-python "from utils.helpers import toggle_launcher; toggle_launcher()"
+ignis run-python "from utils import toggle_launcher; toggle_launcher()"

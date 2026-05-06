@@ -60,7 +60,7 @@ def _ease_in_intervals(total_ms: int, steps: int) -> list[int]:
         return [total_ms]
 
     # Quadratic ease-in: normalized positions 0..1, squared
-    raw = [i / (steps - 1) for i in range(steps)]
+    raw = [(i / (steps - 1)) ** 2 for i in range(steps)]
     # Intervals are the differences between consecutive positions
     deltas = [raw[i + 1] - raw[i] for i in range(steps - 1)]
     total_delta = sum(deltas)
@@ -155,6 +155,7 @@ def create_backdrop_window():
     window._blur_frames = None   # List of (rgb_bytes, w, h) from sharp → blurred
     window._anim_gen = 0         # Generation counter to cancel stale animations
     window._closing = False      # True during close animation
+    window._pending_on_done = None  # Latest on_done to fire when in-flight close finishes
 
     # Export close animation for helpers.py to call
     window._start_close_animation = lambda on_done: _start_close_animation(window, on_done)
@@ -265,22 +266,37 @@ def _start_close_animation(window, on_done):
 
     Called by close_launcher() instead of immediately hiding the window.
     Uses cached frames from the open animation played in reverse.
+
+    Re-entrancy: if a close is already in flight (e.g. rapid double-toggle),
+    chain the new on_done to fire after the in-flight one — never drop it.
     """
     if window._closing:
+        if on_done:
+            prev = window._pending_on_done
+            if prev:
+                window._pending_on_done = lambda: (prev(), on_done())
+            else:
+                window._pending_on_done = on_done
         return
 
     window._closing = True
+    window._pending_on_done = on_done
     window._anim_gen += 1
     gen = window._anim_gen
+
+    def fire_pending():
+        cb = window._pending_on_done
+        window._pending_on_done = None
+        if cb:
+            cb()
 
     if window._blur_frames and len(window._blur_frames) > 1:
         reversed_frames = list(reversed(window._blur_frames))
         # Reverse the easing — close starts fast, slows at end
         intervals = list(reversed(_ease_in_intervals(_CLOSE_DURATION_MS, len(reversed_frames))))
-        _play_frame(window, reversed_frames, 0, gen, intervals, on_done)
+        _play_frame(window, reversed_frames, 0, gen, intervals, fire_pending)
     else:
-        if on_done:
-            on_done()
+        fire_pending()
 
 
 def _play_frame(window, frames, idx, gen, intervals, on_done):

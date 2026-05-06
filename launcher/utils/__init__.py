@@ -17,12 +17,13 @@ from .helpers import (
     load_settings,
     remove_bookmark,
     save_bookmarks,
-    update_window_monitor,
+    toggle_launcher,
 )
 
 __all__ = [
     "launch_app",
     "close_launcher",
+    "toggle_launcher",
     "load_settings",
     "load_bookmarks",
     "save_bookmarks",
@@ -34,5 +35,4 @@ __all__ = [
     "clear_container",
     "find_app_by_id",
     "add_bookmark_with_refresh",
-    "update_window_monitor",
 ]
