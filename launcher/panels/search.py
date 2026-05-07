@@ -63,6 +63,7 @@ class SearchPanel:
         self.router.register(AppSearchHandler(           # 1000: app search (fallback)
             max_results=search_settings.get("max_results", 30),
             fuzzy_threshold=search_settings.get("fuzzy_threshold", 50),
+            frecency_service=self.frecency,
         ))
 
         # Current results from router

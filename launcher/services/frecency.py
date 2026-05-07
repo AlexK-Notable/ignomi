@@ -165,6 +165,22 @@ class FrecencyService(BaseService):
         row = cursor.fetchone()
         return row if row else None
 
+    def get_frecency_score(self, app_id: str) -> float:
+        """
+        Get the frecency score for a specific app.
+
+        Used by the search ranker as a tiebreak boost — apps the user
+        launches often should rank above similar matches.
+
+        Returns:
+            Frecency score (float). 0 if the app has never been launched.
+        """
+        stats = self.get_app_stats(app_id)
+        if not stats:
+            return 0.0
+        launch_count, last_launch, _ = stats
+        return self._calculate_frecency(launch_count, last_launch)
+
     def _calculate_frecency(self, launch_count: int, last_launch: int) -> float:
         """
         Calculate frecency score using Firefox's algorithm.
