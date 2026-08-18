@@ -83,11 +83,14 @@ _fake_hyprland = types.ModuleType("ignis.services.hyprland")
 _fake_hyprland.HyprlandService = MagicMock()
 _fake_audio = types.ModuleType("ignis.services.audio")
 _fake_backlight = types.ModuleType("ignis.services.backlight")
+_fake_systemd = types.ModuleType("ignis.services.systemd")
+_fake_systemd.SystemdService = MagicMock()
 
 _fake_services.applications = _fake_apps
 _fake_services.hyprland = _fake_hyprland
 _fake_services.audio = _fake_audio
 _fake_services.backlight = _fake_backlight
+_fake_services.systemd = _fake_systemd
 _fake_ignis.services = _fake_services
 
 _fake_base_service = types.ModuleType("ignis.base_service")
@@ -112,6 +115,7 @@ sys.modules.setdefault("ignis.services.applications", _fake_apps)
 sys.modules.setdefault("ignis.services.hyprland", _fake_hyprland)
 sys.modules.setdefault("ignis.services.audio", _fake_audio)
 sys.modules.setdefault("ignis.services.backlight", _fake_backlight)
+sys.modules.setdefault("ignis.services.systemd", _fake_systemd)
 sys.modules.setdefault("ignis.base_service", _fake_base_service)
 
 
@@ -191,3 +195,25 @@ def tmp_commands(tmp_path):
     }
     commands_path.write_text(toml.dumps(data))
     return commands_path
+
+
+@pytest.fixture
+def tmp_systemd_config(tmp_path):
+    """Create a real systemd.toml with an array-of-tables unit list."""
+    config_path = tmp_path / "systemd.toml"
+    data = {
+        "units": [
+            {
+                "unit": "waybar.service",
+                "description": "Status bar",
+                "icon": "preferences-desktop-display",
+            },
+            {
+                "unit": "sshd.service",
+                "description": "SSH daemon",
+                "bus": "system",
+            },
+        ]
+    }
+    config_path.write_text(toml.dumps(data))
+    return config_path

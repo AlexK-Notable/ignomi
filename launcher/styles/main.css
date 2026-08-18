@@ -274,3 +274,125 @@ button {
 button:focus {
     outline: none;
 }
+
+
+/* ==========================================================================
+   Screen navigation
+   --------------------------------------------------------------------------
+   The nav bar sits under the search panel on the home screen. One button
+   per registered non-home screen (see screens/manager.py).
+   ========================================================================== */
+
+.nav-bar {
+    padding: 6px;
+}
+
+.nav-button {
+    background-color: @bg_65;
+    color: @fg_70;
+    border: 1px solid @color4_30;
+    border-radius: 8px;
+    padding: 8px 14px;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.nav-button:hover {
+    background-color: @bg_80;
+    border-color: @color6;
+    color: @fg;
+}
+
+.nav-button:active {
+    background-color: @color6_30;
+}
+
+.nav-label {
+    font-size: 13px;
+    font-weight: bold;
+}
+
+
+/* ==========================================================================
+   Systemd screen
+   ========================================================================== */
+
+.systemd-panel {
+    min-width: 640px;
+}
+
+.systemd-header {
+    margin-bottom: 4px;
+}
+
+.systemd-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: @fg;
+}
+
+.systemd-back {
+    background-color: @bg_60;
+    color: @fg_70;
+    border: 1px solid @color4_30;
+    border-radius: 8px;
+    padding: 6px 12px;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.systemd-back:hover {
+    background-color: @bg_80;
+    color: @fg;
+}
+
+.systemd-filter {
+    margin-bottom: 4px;
+}
+
+.systemd-row {
+    padding: 8px 10px;
+}
+
+/* Status dot — colour IS the state, so it must be legible at a glance. */
+.systemd-dot {
+    font-size: 14px;
+    margin: 0 4px;
+}
+
+.systemd-dot-active {
+    color: @success;
+}
+
+.systemd-dot-inactive {
+    color: @fg_50;
+}
+
+.systemd-dot-unknown {
+    color: @warning;
+}
+
+.systemd-action {
+    background-color: @bg_60;
+    color: @fg_70;
+    border: 1px solid @color4_30;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.systemd-action:hover {
+    background-color: @bg_80;
+    border-color: @color6;
+    color: @fg;
+}
+
+.systemd-action:disabled {
+    color: @fg_50;
+    border-color: @color0_20;
+}
+
+.systemd-status {
+    font-size: 12px;
+    color: @fg_50;
+    padding-top: 6px;
+}

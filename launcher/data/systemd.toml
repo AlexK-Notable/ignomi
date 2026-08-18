@@ -1,0 +1,91 @@
+# Systemd units shown in Ignomi's systemd screen.
+#
+# WHY A CURATED LIST, NOT EVERY UNIT
+# ----------------------------------
+# Ignis' SystemdService.units property resolves EVERY unit file on the
+# bus, and each resolution is a synchronous D-Bus LoadUnit round-trip
+# plus a proxy construction. On a normal desktop that is 1000+ blocking
+# calls — it would freeze the launcher for seconds every time you opened
+# this screen. So we name the handful of units worth a button instead.
+# It is also just better UX: nobody wants to scroll 1200 units.
+#
+# FORMAT
+#   [[units]]
+#   unit        = "name.service"   # required — exact unit name
+#   description = "..."            # optional — shown under the name
+#   bus         = "session"        # optional — "session" (default) or "system"
+#   icon        = "..."            # optional — GTK icon name
+#
+# Order here is the order on screen.
+#
+# NOTE ON THE SYSTEM BUS
+# ----------------------
+# bus = "system" units (sshd, NetworkManager, docker...) require polkit
+# authorization to start/stop. Ignomi runs inside your graphical session,
+# so a polkit agent can prompt you — but if no agent is running the call
+# fails silently and the row simply won't change state. Session units
+# need no authorization at all.
+
+# --- Desktop session ---
+
+[[units]]
+unit = "waybar.service"
+description = "Status bar"
+icon = "preferences-desktop-display"
+
+[[units]]
+unit = "swaync.service"
+description = "Notification daemon"
+icon = "preferences-system-notifications"
+
+[[units]]
+unit = "hypridle.service"
+description = "Idle / lock daemon"
+icon = "preferences-desktop-screensaver"
+
+[[units]]
+unit = "hyprpaper.service"
+description = "Wallpaper daemon"
+icon = "preferences-desktop-wallpaper"
+
+[[units]]
+unit = "xdg-desktop-portal-hyprland.service"
+description = "Screenshare / file portal"
+icon = "preferences-desktop"
+
+# --- Audio ---
+
+[[units]]
+unit = "pipewire.service"
+description = "Audio server"
+icon = "audio-card"
+
+[[units]]
+unit = "pipewire-pulse.service"
+description = "PulseAudio compatibility"
+icon = "audio-card"
+
+[[units]]
+unit = "wireplumber.service"
+description = "PipeWire session manager"
+icon = "audio-card"
+
+# --- Tools ---
+
+[[units]]
+unit = "elephant.service"
+description = "Walker data provider"
+icon = "system-run"
+
+[[units]]
+unit = "arch-update-tray.service"
+description = "Update notifier"
+icon = "system-software-update"
+
+# --- System bus example (uncomment to use; needs polkit) ---
+#
+# [[units]]
+# unit = "sshd.service"
+# description = "SSH daemon"
+# bus = "system"
+# icon = "network-server"

@@ -142,17 +142,21 @@ class SearchPanel:
             child=[self._revealer],
         )
 
-    def attach_keyboard_controller(self, window):
-        """Wire the CAPTURE-phase keyboard controller to the root window.
+    def focus_entry(self):
+        """Put keyboard focus in the search entry, without moving the mouse.
 
-        Called by RootPanel after constructing the single Layer Shell
-        window. The controller is on the WINDOW (not the search widget)
-        so arrow keys are intercepted regardless of which panel has focus.
+        Called by the home screen when returning from another screen: the
+        entry has lost focus by then and typing immediately is the whole
+        point of a launcher.
+
+        Deliberately NOT `_grab_entry_focus()`, which also warps the
+        physical pointer via Hyprland. Warping is right on launcher open
+        (the pointer could be anywhere on any monitor); it is wrong here,
+        because the user just clicked Back and having their cursor yanked
+        across the screen for it would be jarring.
         """
-        key_controller = Gtk.EventControllerKey()
-        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        key_controller.connect("key-pressed", self._on_key_press)
-        window.add_controller(key_controller)
+        if self.search_entry is not None:
+            self.search_entry.grab_focus()
 
     def set_revealed(self, revealed: bool):
         """RootPanel calls this when the launcher window opens/closes."""
@@ -309,14 +313,21 @@ class SearchPanel:
         if selected:
             self.results_box.activate_row(selected)
 
-    def _on_key_press(self, controller, keyval, keycode, state):
-        """Handle keyboard events in CAPTURE phase."""
-        from utils.helpers import close_launcher
+    def handle_key(self, keyval, state) -> bool:
+        """Handle a key event routed here by the active screen.
 
-        if keyval == Gdk.KEY_Escape:
-            close_launcher()
-            return True
+        The CAPTURE-phase controller lives on the launcher window and is
+        owned by RootPanel, which applies global policy (Escape) first
+        and then offers the event to the current screen. The home screen
+        forwards it here.
 
+        Escape is deliberately absent: on the home screen it closes the
+        launcher, on any other screen it goes back — that decision is not
+        the search panel's to make.
+
+        Returns:
+            True if the event was consumed.
+        """
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             selected = self.results_box.get_selected_row()
             if selected:

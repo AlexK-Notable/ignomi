@@ -56,7 +56,10 @@ Ignomi is a Wayland launcher built on the Ignis framework (GTK4 + Layer Shell). 
 
 | Component | Module | Role |
 |-----------|--------|------|
-| `RootPanel` | `launcher/panels/root.py` | Owns the single window; composes everything; orchestrates open/close |
+| `RootPanel` | `launcher/panels/root.py` | Owns the single window + backdrop; hosts the screen Stack; orchestrates open/close; owns global key policy (Escape) |
+| `ScreenManager` | `launcher/screens/manager.py` | Registry + `widgets.Stack` for screens; `register()` / `build()` / `switch_to()` / `go_home()` |
+| `HomeScreen` | `launcher/screens/home.py` | Default screen: composes the three panels + the generated nav bar; owns the open/close reveal |
+| `SystemdScreen` | `launcher/screens/systemd.py` | Start/stop/restart a curated unit list from `data/systemd.toml` |
 | `BookmarksPanel` | `launcher/panels/bookmarks.py` | `create_widget()` returns left-aligned content; revealed via `slide_right` Revealer |
 | `SearchPanel` | `launcher/panels/search.py` | `create_widget()` returns centered content with internal `crossfade` Revealer |
 | `FrequentPanel` | `launcher/panels/frequent.py` | `create_widget()` returns right-aligned content; revealed via `slide_left` Revealer |
@@ -67,6 +70,40 @@ The single window: `namespace="ignomi-launcher"`, `anchor=["top","bottom","left"
 - The compositor never sees siblings, so the search-panel-drift bug class is impossible by construction (see z-note `[[20260226T022743651177993774]]` for the historical issue).
 - All animations are GTK Revealers; nothing in Hyprland's `windowrules.conf` needs Ignomi-specific rules anymore.
 - `close_launcher()` becomes one method call (`RootPanel.close()`) instead of per-surface dispatch.
+
+### Screen System (`launcher/screens/`)
+
+The single window hosts a `widgets.Stack` of **screens**. Exactly one screen is visible; switching is a 200 ms crossfade. `HomeScreen` is the default and holds the classic bookmarks | search | frequent composition plus a nav bar; pressing a nav button switches to that screen, Escape returns home.
+
+```
+launcher/screens/
+├── manager.py     # Screen Protocol + ScreenManager (registry, Stack, switching)
+├── home.py        # HomeScreen — the three panels + generated nav bar
+└── systemd.py     # SystemdScreen — curated unit controls
+```
+
+**Adding a screen** — three steps, no refactor:
+
+1. Write a class with `name`, `title`, `icon`, and `create_widget()`.
+2. `self.screens.register(MyScreen())` in `RootPanel.__init__`.
+3. There is no step 3 — the nav button is generated from the registry.
+
+Optional hooks, probed with `getattr` so you can omit them: `show_in_nav` (default True), `on_enter()`, `on_leave()`, `on_key_press(keyval, state) -> bool`.
+
+**Rules that matter:**
+
+- **Screen switching is the Stack crossfade and nothing else.** Panel Revealers are driven ONLY by launcher open/close (`HomeScreen.set_revealed()`). Animating both at once recreates the dual-animation conflict — see the iron rule below.
+- **Mechanism vs policy**: `ScreenManager` switches; `RootPanel` decides what Escape means. The window-level CAPTURE key controller lives on `RootPanel`, applies Escape (back, or close when already home), then offers the event to the active screen via `ScreenManager.handle_key()`. It used to live on `SearchPanel` and closed the launcher unconditionally — wrong the moment a second screen exists.
+- **Ignis quirk**: `widgets.Stack`'s `child` setter calls `add_titled(child, None, title)` — pages get NO name, so `set_visible_child_name()` can never work. `ScreenManager` keeps its own `name -> widget` map and uses `set_visible_child(widget)`.
+- **Import cycle**: `panels/__init__.py` imports `root`, and `root` needs `HomeScreen`, which imports the panels. `RootPanel.__init__` therefore imports `HomeScreen`/`SystemdScreen` lazily. Do not hoist those to module level — it breaks depending on which package is imported first.
+
+### Systemd Screen (`launcher/screens/systemd.py`)
+
+- Units come from `launcher/data/systemd.toml` (array-of-tables: `unit`, optional `description` / `bus` / `icon`). **Never** call `SystemdService.units` — it resolves every unit file on the bus via one synchronous `LoadUnit` D-Bus round-trip each (1000+ blocking calls; the launcher would freeze).
+- Units resolve **lazily on first `on_enter()`**, never at construction, so launcher startup does no D-Bus work.
+- Live state via `notify::is-active` connected once per unit at resolve time; rows are rebuilt on filter, units are not.
+- `bus = "system"` units need polkit authorization to act on. Session units need none.
+- **Gotcha (verified against the real bus):** `get_unit()` does NOT raise for a unit that doesn't exist — the manager returns a stub with `is_active = False`, so a typo in `systemd.toml` looks like a merely-stopped service. The `start()`/`stop()`/`restart()` call *does* raise (`org.freedesktop.systemd1.NoSuchUnit`), so the screen marks the unit unavailable on that first failed action.
 
 ### Animation Architecture
 
@@ -136,6 +173,7 @@ launcher/search/
 | `launcher/data/settings.toml` | `[launcher]` (close_delay_ms), `[frecency]` (max_items, min_launches), `[search]` (max_results, fuzzy_threshold), `[animation]` (transition_duration). **No `[panels]` or `[backdrop]` section** — panel widths and per-monitor blur are hard-coded. |
 | `launcher/data/bookmarks.json` | Seed bookmarks. Migrated to `~/.local/share/ignomi/bookmarks.json` on first run; the in-repo file is read once. |
 | `launcher/data/commands.toml` | User-defined `!`-prefixed commands consumed by `CustomCommandsHandler`. |
+| `launcher/data/systemd.toml` | Curated unit list for `SystemdScreen` (array-of-tables: `unit`, `description`, `bus`, `icon`). |
 | `launcher/styles/main.css` | Main GTK4 stylesheet. |
 | `launcher/styles/colors.css` | Wallust-generated palette (symlinked from `~/.config/ignomi/colors.css`). |
 
@@ -202,8 +240,10 @@ Run the suite from the repo root:
 pytest tests/ -v
 ```
 
-- ~70-80 tests across 8 files: `test_app_search.py`, `test_calculator.py`, `test_commands.py`, `test_web_search.py`, `test_router.py`, `test_bookmarks.py`, `test_settings.py`, `test_frecency.py`.
-- Fixtures in `tests/conftest.py`: `tmp_db`, `tmp_bookmarks`, `tmp_settings`, `tmp_commands` — each creates a real file in `tmp_path`, no filesystem mocking.
+- 194 tests, 1 skipped (the cage smoke test) as of the screens sprint.
+- Fixtures in `tests/conftest.py`: `tmp_db`, `tmp_bookmarks`, `tmp_settings`, `tmp_commands`, `tmp_systemd_config` — each creates a real file in `tmp_path`, no filesystem mocking.
+- **The system `python3` cannot run the suite** — it has no `toml`. Use the Ignis venv: `~/.local/share/pipx/venvs/ignis/bin/python -m pytest tests/ -v`.
+- `ruff` is not installed locally; `uvx ruff check launcher/` works. Two pre-existing `I001` import-order errors in `panels/backdrop.py` and `panels/search.py:278` are known and untouched.
 - **Headless-import-mock pattern**: `test_app_search.py`, `test_bookmarks.py`, and `test_frecency.py` install `MagicMock` modules into `sys.modules` for `gi`, `gi.repository`, `ignis`, `ignis.widgets`, and `ignis.services.*` BEFORE importing the modules under test. This lets the suite run on a headless box (CI, remote shell) with no display server.
 - Only mock these specific surfaces: `time.time()`, `GObject.emit`, `BaseService.__init__`, `ApplicationsService.apps`. Real file I/O exercises real bugs.
 
@@ -214,11 +254,16 @@ pytest tests/ -v
 - `_bookmarks_path` XDG migration → `tests/test_helpers_xdg.py`
 - `get_monitor_under_cursor` / `hyprland_monitor_to_ignis_monitor` → `tests/test_monitor_helpers.py`
 
+**Covered as of the screens sprint (2026-08):**
+- `ScreenManager` registry, nav-bar generation, switching, lifecycle-hook failure isolation, key routing → `tests/test_screens.py` (25 tests)
+- `load_unit_configs` parsing + `SystemdScreen` actions, toggle, status dots, filtering, D-Bus error humanising → `tests/test_systemd_screen.py` (38 tests)
+
 **Still uncovered (real test debt):**
 - `backdrop.py` everything except `_ease_in_intervals` (PIL pipeline, generation counter, frame streaming, threaded capture)
 - `BookmarksPanel` / `SearchPanel` / `FrequentPanel` constructors and signal wiring
 - `RootPanel` open/close orchestration
 - `toggle_launcher()` / `close_launcher()` integration (the new RootPanel singleton path)
+- `HomeScreen.create_widget()` end-to-end — it constructs `BookmarksPanel`, whose context menu calls `IgnisMenuItem`, which requires a fully initialized `IgnisApp`. It therefore cannot be built outside the running daemon, which is also why no test constructs a real `RootPanel`.
 
 There's also an opt-in cage smoke test at `tests/test_cage_smoke.py` — only runs if `cage`, `ignis`, and `wayland-info` are on PATH.
 
