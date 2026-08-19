@@ -62,11 +62,21 @@ class Screen(Protocol):
     Optional hooks (probed with getattr, omit them freely):
         show_in_nav (bool):  generate a nav button for this screen.
                              Defaults to True when absent.
+        dismiss_on_outside_click (bool):
+                             allow a click on the backdrop to close the
+                             launcher. Defaults to True when absent; set
+                             False for a screen that would lose work.
         on_enter():          called after this screen becomes visible.
         on_leave():          called before this screen is replaced.
         on_key_press(keyval, state) -> bool:
                              screen-local key handling. Return True to
                              consume the event.
+
+    Note on click-to-dismiss: RootPanel decides "content vs backdrop" by
+    walking up from the clicked widget looking for the `panel` or
+    `nav-bar` CSS class (see `SOLID_CSS_CLASSES` in panels/root.py). Give
+    your screen's visible container the `panel` class — as every existing
+    panel does — and clicks on it will not fall through to the backdrop.
     """
 
     name: str

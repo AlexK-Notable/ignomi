@@ -78,6 +78,55 @@ from utils.helpers import get_monitor_under_cursor, load_settings
 
 NAMESPACE = "ignomi-launcher"
 
+# CSS classes that mark a widget as launcher *content*. The launcher
+# window covers the whole output, so "did the user click the UI or the
+# blurred desktop behind it?" cannot be answered by geometry — every
+# point is inside the window. It is answered by asking what the click
+# actually landed on and walking up its ancestors: if the chain passes
+# through one of these classes it was content, otherwise it was backdrop.
+#
+# Keying off `panel` is not a coincidence — all four panels already carry
+# it (bookmarks, frequent, search, systemd), so any future screen that
+# follows the existing convention gets click-to-dismiss for free.
+SOLID_CSS_CLASSES = frozenset({"panel", "nav-bar"})
+
+
+def is_background_target(widget, stop_at=None, solid_classes=SOLID_CSS_CLASSES) -> bool:
+    """Is `widget` outside every launcher content region?
+
+    Walks from the clicked widget up through its ancestors looking for a
+    content marker. Pure and widget-library-agnostic (it only calls
+    `get_css_classes()` and `get_parent()`) so it is directly testable.
+
+    A None widget returns False (do NOT dismiss), which is the deliberate
+    conservative choice. On a mapped, full-screen window every click has
+    some target — at worst the window itself — so None means GTK could
+    not resolve one, and the cost of guessing wrong is asymmetric: guess
+    "content" and a backdrop click occasionally fails to close; guess
+    "background" and a malfunctioning pick closes the launcher out from
+    under every click. Note `pick()` also ignores unmapped widgets, so it
+    returns None for everything on a window that was never shown.
+
+    Args:
+        widget: the picked widget, or None when the pick found nothing.
+        stop_at: ancestor to stop walking at (normally the window).
+        solid_classes: CSS classes that count as content.
+
+    Returns:
+        True when the click should dismiss the launcher.
+    """
+    if widget is None:
+        return False
+
+    node = widget
+    while node is not None:
+        if solid_classes.intersection(node.get_css_classes()):
+            return False
+        if node is stop_at:
+            break
+        node = node.get_parent()
+    return True
+
 
 class RootPanel:
     """The single window that owns the backdrop and every screen."""
@@ -108,6 +157,11 @@ class RootPanel:
         # Widgets created in create_window()
         self.window = None
         self._backdrop_picture = None
+
+        # Click-to-dismiss needs the PRESS location, not just the release
+        # one — otherwise dragging a bookmark out of its panel and letting
+        # go over the backdrop would close the launcher mid-reorder.
+        self._press_on_background = False
 
     @classmethod
     def get_default(cls):
@@ -150,7 +204,10 @@ class RootPanel:
         #    panel, so it fires regardless of which widget has focus.
         self._attach_keyboard_controller()
 
-        # 6. Single visibility-changed handler orchestrates open.
+        # 6. Click-anywhere-outside-the-UI to dismiss.
+        self._attach_dismiss_gesture()
+
+        # 7. Single visibility-changed handler orchestrates open.
         self.window.connect("notify::visible", self._on_visibility_changed)
 
         return self.window
@@ -181,6 +238,55 @@ class RootPanel:
             return True
 
         return self.screens.handle_key(keyval, state)
+
+    # --- Click-outside-to-dismiss -------------------------------------------
+
+    def _attach_dismiss_gesture(self):
+        """Wire the click-outside-to-dismiss gesture to the launcher window.
+
+        BUBBLE phase, deliberately: children get the click first, so a
+        button, list row or text entry claims its own press and this
+        never sees it. Only clicks nothing else wanted reach us.
+        """
+        gesture = Gtk.GestureClick()
+        gesture.set_button(1)  # primary button only
+        gesture.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
+        gesture.connect("pressed", self._on_pointer_pressed)
+        gesture.connect("released", self._on_pointer_released)
+        self.window.add_controller(gesture)
+
+    def _on_pointer_pressed(self, gesture, n_press, x, y):
+        self._press_on_background = self._point_is_background(x, y)
+
+    def _on_pointer_released(self, gesture, n_press, x, y):
+        """Dismiss only when press AND release both landed on backdrop.
+
+        Requiring both ends is what makes dragging safe: a bookmark drag
+        that starts inside a panel and ends over the blur must reorder,
+        not close the launcher.
+        """
+        pressed_outside = self._press_on_background
+        self._press_on_background = False
+
+        if not pressed_outside:
+            return
+        if not self._point_is_background(x, y):
+            return
+
+        # A screen may opt out (e.g. something mid-edit that shouldn't be
+        # dismissed by a stray click). Default is to allow.
+        screen = self.screens.current_screen
+        if not getattr(screen, "dismiss_on_outside_click", True):
+            return
+
+        from utils.helpers import close_launcher
+
+        close_launcher()
+
+    def _point_is_background(self, x, y) -> bool:
+        """Did the point land on the backdrop rather than on any UI?"""
+        picked = self.window.pick(x, y, Gtk.PickFlags.DEFAULT)
+        return is_background_target(picked, stop_at=self.window)
 
     # --- Open / close orchestration -----------------------------------------
 

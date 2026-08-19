@@ -56,7 +56,7 @@ Ignomi is a Wayland launcher built on the Ignis framework (GTK4 + Layer Shell). 
 
 | Component | Module | Role |
 |-----------|--------|------|
-| `RootPanel` | `launcher/panels/root.py` | Owns the single window + backdrop; hosts the screen Stack; orchestrates open/close; owns global key policy (Escape) |
+| `RootPanel` | `launcher/panels/root.py` | Owns the single window + backdrop; hosts the screen Stack; orchestrates open/close; owns global input policy (Escape, click-to-dismiss) |
 | `ScreenManager` | `launcher/screens/manager.py` | Registry + `widgets.Stack` for screens; `register()` / `build()` / `switch_to()` / `go_home()` |
 | `HomeScreen` | `launcher/screens/home.py` | Default screen: composes the three panels + the generated nav bar; owns the open/close reveal |
 | `SystemdScreen` | `launcher/screens/systemd.py` | Start/stop/restart a curated unit list from `data/systemd.toml` |
@@ -96,6 +96,18 @@ Optional hooks, probed with `getattr` so you can omit them: `show_in_nav` (defau
 - **Mechanism vs policy**: `ScreenManager` switches; `RootPanel` decides what Escape means. The window-level CAPTURE key controller lives on `RootPanel`, applies Escape (back, or close when already home), then offers the event to the active screen via `ScreenManager.handle_key()`. It used to live on `SearchPanel` and closed the launcher unconditionally — wrong the moment a second screen exists.
 - **Ignis quirk**: `widgets.Stack`'s `child` setter calls `add_titled(child, None, title)` — pages get NO name, so `set_visible_child_name()` can never work. `ScreenManager` keeps its own `name -> widget` map and uses `set_visible_child(widget)`.
 - **Import cycle**: `panels/__init__.py` imports `root`, and `root` needs `HomeScreen`, which imports the panels. `RootPanel.__init__` therefore imports `HomeScreen`/`SystemdScreen` lazily. Do not hoist those to module level — it breaks depending on which package is imported first.
+
+### Click-to-Dismiss
+
+Clicking the blurred backdrop — anywhere that isn't launcher UI — closes the launcher and returns you to the desktop. Implemented in `RootPanel` alongside the Escape policy, since it is the same kind of global input decision.
+
+The window covers the whole output, so "UI or backdrop?" cannot be answered by geometry — every point is inside the window. It is answered by `Gtk.Widget.pick()` (GTK's own event-targeting call) followed by an ancestor walk looking for a **content marker** CSS class: `SOLID_CSS_CLASSES = {"panel", "nav-bar"}` in `panels/root.py`.
+
+- **Give any new screen's visible container the `panel` class.** All four existing panels already have it, so a screen following the convention gets click-to-dismiss for free. A screen styled only with a variant class (`.my-panel`, no `.panel`) would fall through and dismiss when clicked — there is a regression test for exactly that.
+- **Press *and* release must both land on backdrop.** Otherwise dragging a bookmark out of its panel and releasing over the blur would close the launcher mid-reorder.
+- **BUBBLE phase**, so buttons/rows/entries claim their own clicks first and this only sees what nothing else wanted.
+- A screen can opt out with `dismiss_on_outside_click = False`.
+- `pick()` returning `None` is treated as **content, not backdrop** — on a mapped full-screen window every click has a target, so `None` is an anomaly, and the conservative guess avoids a broken pick closing the launcher on every click. Note this also means `pick()` yields `None` for everything on a window that was never mapped, which is why the hit test cannot be exercised in the headless suite (the ancestor-walk half is covered by `tests/test_click_dismiss.py`).
 
 ### Systemd Screen (`launcher/screens/systemd.py`)
 
@@ -257,6 +269,7 @@ pytest tests/ -v
 **Covered as of the screens sprint (2026-08):**
 - `ScreenManager` registry, nav-bar generation, switching, lifecycle-hook failure isolation, key routing → `tests/test_screens.py` (25 tests)
 - `load_unit_configs` parsing + `SystemdScreen` actions, toggle, status dots, filtering, D-Bus error humanising → `tests/test_systemd_screen.py` (38 tests)
+- `is_background_target` content-vs-backdrop hit testing for click-to-dismiss → `tests/test_click_dismiss.py` (14 tests)
 
 **Still uncovered (real test debt):**
 - `backdrop.py` everything except `_ease_in_intervals` (PIL pipeline, generation counter, frame streaming, threaded capture)
