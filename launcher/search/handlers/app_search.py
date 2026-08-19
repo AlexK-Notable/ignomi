@@ -53,6 +53,11 @@ class AppSearchHandler:
     name = "app_search"
     priority = 1000
 
+    # Optional metadata, read by the shortcuts screen to document itself.
+    # No prefix: this is the always-matches fallback.
+    description = "Default — searches installed applications"
+    example = "firefox"
+
     def __init__(
         self,
         max_results: int = 30,

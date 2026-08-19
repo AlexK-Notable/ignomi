@@ -60,6 +60,9 @@ Ignomi is a Wayland launcher built on the Ignis framework (GTK4 + Layer Shell). 
 | `ScreenManager` | `launcher/screens/manager.py` | Registry + `widgets.Stack` for screens; `register()` / `build()` / `switch_to()` / `go_home()` |
 | `HomeScreen` | `launcher/screens/home.py` | Default screen: composes the three panels + the generated nav bar; owns the open/close reveal |
 | `SystemdScreen` | `launcher/screens/systemd.py` | Start/stop/restart a curated unit list from `data/systemd.toml` |
+| `ClipboardScreen` | `launcher/screens/clipboard.py` | Clipboard history via elephant — copy / pin / remove |
+| `ShortcutsScreen` | `launcher/screens/shortcuts.py` | Cheat sheet **generated** from the router + screen registries |
+| `ElephantClient` | `launcher/services/elephant.py` | Wraps the `elephant` CLI (query + activate) for the three integrations |
 | `BookmarksPanel` | `launcher/panels/bookmarks.py` | `create_widget()` returns left-aligned content; revealed via `slide_right` Revealer |
 | `SearchPanel` | `launcher/panels/search.py` | `create_widget()` returns centered content with internal `crossfade` Revealer |
 | `FrequentPanel` | `launcher/panels/frequent.py` | `create_widget()` returns right-aligned content; revealed via `slide_left` Revealer |
@@ -109,6 +112,41 @@ The window covers the whole output, so "UI or backdrop?" cannot be answered by g
 - A screen can opt out with `dismiss_on_outside_click = False`.
 - `pick()` returning `None` is treated as **content, not backdrop** — on a mapped full-screen window every click has a target, so `None` is an anomaly, and the conservative guess avoids a broken pick closing the launcher on every click. Note this also means `pick()` yields `None` for everything on a window that was never mapped, which is why the hit test cannot be exercised in the headless suite (the ancestor-walk half is covered by `tests/test_click_dismiss.py`).
 
+### Elephant Integration (`launcher/services/elephant.py`)
+
+Ignis has **no** clipboard, file-search or emoji support (grepping the package for `clipboard`, `wl-copy` and `emoji` returns nothing). Those three come from [elephant](https://github.com/abenz1267/elephant), Walker's provider daemon, which is already installed here. The other five elephant providers (`calc`, `desktopapplications`, `websearch`, `runner`, `providerlist`) duplicate existing Ignomi handlers and are deliberately **not** used.
+
+**Transport is the `elephant` CLI, not the raw socket** — `elephant query` is documented and stable, the wire format is not. `ignis.utils.socket` is available if this ever needs to be faster; the measurements below say it doesn't.
+
+Protocol (verified against elephant 2.22.0 — all semicolon-separated positional strings, *not* flags):
+
+```bash
+elephant query --json "<providers>;<query>;<limit>[;exactsearch]"   # NDJSON out, one item per line
+elephant activate "<provider>;<identifier>;<action>;;"              # exactly FIVE fields
+```
+
+- **Output is NDJSON, not a JSON array.** Parse line by line.
+- **`activate` needs five fields.** Fewer and the CLI *panics* with a Go index error instead of printing usage. `ElephantClient.activate` builds this; there is a test asserting the exact string.
+- Actions: `symbols` → `run_cmd`; `clipboard` → `copy`/`edit`/`pin`/`remove`; `files` → `open`/`opendir`/`copyfile`/`copypath`.
+
+**The daemon is not a systemd unit.** It runs detached (PPID 1); `systemctl --user list-unit-files` has no elephant entry unless you run `elephant service enable`. `ElephantClient.is_available()` checks for the socket at `$XDG_RUNTIME_DIR/elephant/elephant.sock`, and every method degrades to empty/False with a log line rather than raising.
+
+**Do not run a second `elephant` process to test.** A transient instance takes over the socket and *deletes it on exit*, leaving the already-running daemon alive but unreachable (this broke Walker mid-session once). Query the existing daemon instead.
+
+Measured latency on this machine (median of 5): clipboard 6.5 ms, symbols 10.5 ms, files 66.2 ms. The search router is synchronous, so these block the GTK main thread — which is why **file search sits behind the explicit `f:` prefix**. Ordinary typing never reaches elephant.
+
+### Shortcuts Screen (`launcher/screens/shortcuts.py`)
+
+The in-launcher cheat sheet, and it is **generated, not written**: prefixes come from the live `QueryRouter` registry, panels from the live `ScreenManager` registry. A handler documents itself with three optional attributes, read via `getattr`:
+
+```python
+prefixes = [":"]                                  # omit for keyword/fallback handlers
+description = "Emoji and unicode symbols"
+example = ":smile"
+```
+
+Add a handler and it appears here automatically — there is a test (`test_a_newly_registered_handler_needs_no_edit_here`) pinning that property. The one hand-maintained part is `KEY_BINDINGS`, since key handling is spread across `RootPanel` and each screen's `on_key_press` with no registry to read.
+
 ### Systemd Screen (`launcher/screens/systemd.py`)
 
 - Units come from `launcher/data/systemd.toml` (array-of-tables: `unit`, optional `description` / `bus` / `icon`). **Never** call `SystemdService.units` — it resolves every unit file on the bus via one synchronous `LoadUnit` D-Bus round-trip each (1000+ blocking calls; the launcher would freeze).
@@ -133,7 +171,9 @@ launcher/search/
 └── handlers/
     ├── controls.py        # SystemControlsHandler   priority 50   (volume / brightness widgets)
     ├── calculator.py      # CalculatorHandler       priority 100  ("=" prefix, simpleeval)
+    ├── symbols.py         # SymbolsHandler          priority 150  (":" prefix, elephant symbols)
     ├── web_search.py      # WebSearchHandler        priority 200  ("?", "g:", "w:", "gh:", "yt:" prefixes)
+    ├── files.py           # FilesHandler            priority 250  ("f:" prefix, elephant files)
     ├── commands.py        # CustomCommandsHandler   priority 300  ("!" prefix, reads commands.toml)
     └── app_search.py      # AppSearchHandler        priority 1000 (fallback — always matches)
 ```
@@ -252,7 +292,7 @@ Run the suite from the repo root:
 pytest tests/ -v
 ```
 
-- 194 tests, 1 skipped (the cage smoke test) as of the screens sprint.
+- 273 tests, 1 skipped (the cage smoke test) as of the elephant sprint.
 - Fixtures in `tests/conftest.py`: `tmp_db`, `tmp_bookmarks`, `tmp_settings`, `tmp_commands`, `tmp_systemd_config` — each creates a real file in `tmp_path`, no filesystem mocking.
 - **The system `python3` cannot run the suite** — it has no `toml`. Use the Ignis venv: `~/.local/share/pipx/venvs/ignis/bin/python -m pytest tests/ -v`.
 - `ruff` is not installed locally; `uvx ruff check launcher/` works. Two pre-existing `I001` import-order errors in `panels/backdrop.py` and `panels/search.py:278` are known and untouched.
@@ -270,6 +310,11 @@ pytest tests/ -v
 - `ScreenManager` registry, nav-bar generation, switching, lifecycle-hook failure isolation, key routing → `tests/test_screens.py` (25 tests)
 - `load_unit_configs` parsing + `SystemdScreen` actions, toggle, status dots, filtering, D-Bus error humanising → `tests/test_systemd_screen.py` (38 tests)
 - `is_background_target` content-vs-backdrop hit testing for click-to-dismiss → `tests/test_click_dismiss.py` (14 tests)
+
+**Covered as of the elephant sprint (2026-08):**
+- `ElephantClient` NDJSON parsing, availability gating, command construction, every failure mode → `tests/test_elephant.py` (22 tests). Fixtures are verbatim captures from the live daemon.
+- `SymbolsHandler` / `FilesHandler` match discipline, result mapping, activation → `tests/test_elephant_handlers.py` (28 tests)
+- `ShortcutsScreen` registry-driven generation, including the anti-staleness property → `tests/test_shortcuts_screen.py` (15 tests)
 
 **Still uncovered (real test debt):**
 - `backdrop.py` everything except `_ease_in_intervals` (PIL pipeline, generation counter, frame streaming, threaded capture)

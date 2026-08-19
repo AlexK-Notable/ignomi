@@ -396,3 +396,68 @@ button:focus {
     color: @fg_50;
     padding-top: 6px;
 }
+
+
+/* ==========================================================================
+   Clipboard screen
+   ========================================================================== */
+
+.clipboard-panel {
+    min-width: 680px;
+}
+
+.clipboard-action-remove:hover {
+    border-color: @error;
+    color: @error;
+}
+
+.clipboard-action-pin:hover {
+    border-color: @warning;
+    color: @warning;
+}
+
+
+/* ==========================================================================
+   Shortcuts screen
+   --------------------------------------------------------------------------
+   Reference sheet generated from the router + screen registries. Rows are
+   a fixed-width key column and a description column.
+   ========================================================================== */
+
+.shortcuts-panel {
+    min-width: 620px;
+}
+
+.shortcuts-section {
+    margin-bottom: 14px;
+}
+
+.shortcuts-heading {
+    font-size: 12px;
+    font-weight: bold;
+    color: @color6;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 8px;
+    margin-bottom: 6px;
+}
+
+.shortcuts-row {
+    padding: 3px 4px;
+}
+
+.shortcuts-key {
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: bold;
+    color: @fg;
+    background-color: @bg_60;
+    border: 1px solid @color4_30;
+    border-radius: 5px;
+    padding: 2px 8px;
+}
+
+.shortcuts-desc {
+    font-size: 13px;
+    color: @fg_70;
+}

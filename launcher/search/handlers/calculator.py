@@ -26,6 +26,11 @@ class CalculatorHandler:
     name = "calculator"
     priority = 100
 
+    # Optional metadata, read by the shortcuts screen to document itself.
+    prefixes = ["="]
+    description = "Evaluate a math expression"
+    example = "=2+2*10"
+
     def matches(self, query: str) -> bool:
         if not HAS_SIMPLEEVAL:
             return False

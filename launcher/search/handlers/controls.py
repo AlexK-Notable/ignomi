@@ -35,6 +35,11 @@ class SystemControlsHandler:
     name = "controls"
     priority = 50  # Highest priority — check before everything
 
+    # Optional metadata, read by the shortcuts screen to document itself.
+    # Keyword-triggered rather than prefixed, hence no `prefixes`.
+    description = "Inline volume / brightness sliders — type the keyword"
+    example = "volume"
+
     def _audio_available(self) -> bool:
         """Check if audio control is actually usable."""
         if not HAS_AUDIO:

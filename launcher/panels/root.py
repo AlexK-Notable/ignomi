@@ -140,7 +140,9 @@ class RootPanel:
 
         # Deferred to break the panels <-> screens import cycle (see the
         # note beside the module-level imports).
+        from screens.clipboard import ClipboardScreen
         from screens.home import HomeScreen
+        from screens.shortcuts import ShortcutsScreen
         from screens.systemd import SystemdScreen
 
         settings = load_settings()
@@ -152,7 +154,15 @@ class RootPanel:
         self.screens = ScreenManager(transition_duration=duration)
         self.home_screen = HomeScreen(self.screens, transition_duration=duration)
         self.screens.register(self.home_screen, is_home=True)
+        self.screens.register(ClipboardScreen())
         self.screens.register(SystemdScreen())
+
+        # Registered last so its nav button sits at the end of the row,
+        # and so it can document every screen registered before it.
+        self.screens.register(ShortcutsScreen(
+            router=self.home_screen.search_panel.router,
+            manager=self.screens,
+        ))
 
         # Widgets created in create_window()
         self.window = None

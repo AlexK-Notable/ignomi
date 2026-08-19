@@ -62,8 +62,15 @@ class WebSearchHandler:
     _ALLOWED_URL_SCHEMES = ("http://", "https://")
     _REQUIRED_KEYS = frozenset(("name", "url"))
 
+    # Optional metadata, read by the shortcuts screen to document itself.
+    # `prefixes` is set per-instance below, since the engine set is
+    # user-configurable via settings.toml.
+    description = "Search the web — one prefix per configured engine"
+    example = "?wayland layer shell"
+
     def __init__(self, engines: dict = None):
         self.engines = self._validate_engines(engines) if engines else DEFAULT_ENGINES
+        self.prefixes = list(self.engines.keys())
 
     @classmethod
     def _validate_engines(cls, engines: dict) -> dict:

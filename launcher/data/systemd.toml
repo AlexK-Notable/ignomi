@@ -72,10 +72,11 @@ icon = "audio-card"
 
 # --- Tools ---
 
-[[units]]
-unit = "elephant.service"
-description = "Walker data provider"
-icon = "system-run"
+# NOTE: elephant is deliberately absent. It runs as a detached process
+# (PPID 1), NOT as a systemd unit — `systemctl --user list-unit-files`
+# has no elephant entry at all. Listing it here would render a row that
+# looks like a merely-stopped service until you clicked it. Enable a
+# real unit with `elephant service enable` first if you want it here.
 
 [[units]]
 unit = "arch-update-tray.service"

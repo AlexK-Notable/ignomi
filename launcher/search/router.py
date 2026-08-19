@@ -43,6 +43,17 @@ class QueryRouter:
         self._handlers.append(handler)
         self._handlers.sort(key=lambda h: h.priority)
 
+    @property
+    def handlers(self) -> list[SearchHandler]:
+        """Registered handlers, in priority order (lowest number first).
+
+        Exposed so the shortcuts screen can document what the search bar
+        accepts by reading the live registry rather than a hand-written
+        list that would silently go stale. Returns a copy — callers must
+        not reorder the router's dispatch.
+        """
+        return list(self._handlers)
+
     def route(self, query: str) -> tuple[str, list[ResultItem]]:
         """
         Find the first matching handler and return its results.

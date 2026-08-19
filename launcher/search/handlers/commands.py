@@ -32,6 +32,11 @@ class CustomCommandsHandler:
     name = "commands"
     priority = 300
 
+    # Optional metadata, read by the shortcuts screen to document itself.
+    prefixes = ["!"]
+    description = "Custom commands from data/commands.toml — '!' alone lists them"
+    example = "!lock"
+
     def __init__(self):
         self.commands = self._load_commands()
 

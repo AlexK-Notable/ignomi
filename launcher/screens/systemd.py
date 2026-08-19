@@ -151,6 +151,7 @@ class SystemdScreen:
     title = "Systemd"
     icon = "system-run"
     show_in_nav = True
+    description = "Start, stop and restart your systemd units"
 
     def __init__(self, config_path=None):
         self.unit_configs = load_unit_configs(config_path)
