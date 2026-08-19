@@ -54,8 +54,11 @@ class AppSearchHandler:
     priority = 1000
 
     # Optional metadata, read by the shortcuts screen to document itself.
-    # No prefix: this is the always-matches fallback.
-    description = "Default — searches installed applications"
+    # No prefix: this is the always-matches fallback, so the trigger is
+    # literally anything. `trigger_label` says that, rather than letting
+    # the screen fall back to `example` and imply "firefox" is a command.
+    trigger_label = "any text"
+    description = "Search installed applications (e.g. firefox)"
     example = "firefox"
 
     def __init__(

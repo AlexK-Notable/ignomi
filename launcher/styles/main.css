@@ -425,7 +425,10 @@ button:focus {
    ========================================================================== */
 
 .shortcuts-panel {
-    min-width: 620px;
+    /* Wide enough that descriptions have room to breathe before the
+       wrap kicks in; rows wrap rather than truncate, so nothing is lost
+       either way. */
+    min-width: 780px;
 }
 
 .shortcuts-section {
@@ -443,7 +446,7 @@ button:focus {
 }
 
 .shortcuts-row {
-    padding: 3px 4px;
+    padding: 4px 4px;
 }
 
 .shortcuts-key {

@@ -266,6 +266,17 @@ GTK4 CSS cannot use `alpha()` with `@define-color` variables — they resolve at
 
 Naming convention: `@base_opacitypercent` (e.g. `@bg_65`, `@color4_30`). All variants must be declared in `~/.config/wallust/templates/ignomi.css`.
 
+### Ignis enum properties round-trip as strings, not enums
+
+`BaseWidget.override_enum` makes `set_property` accept a lowercase string (`transition_type="crossfade"` → `Gtk.StackTransitionType.CROSSFADE` via `getattr(enum, value.upper())`). The **getter** is asymmetric: it returns `value_nick`, i.e. the *string*. So:
+
+```python
+label.get_ellipsize() == Pango.EllipsizeMode.NONE   # always False!
+label.get_ellipsize() == "none"                     # correct
+```
+
+This bit a verification probe, which reported 14 correctly-configured labels as broken. Compare against the string (or accept both) for any overridden enum: `ellipsize`, `wrap_mode`, `justify`, `transition_type`, `valign`/`halign`.
+
 ### Wallust Template Variables
 
 Available in `~/.config/wallust/templates/ignomi.css`:

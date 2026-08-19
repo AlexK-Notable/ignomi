@@ -63,14 +63,22 @@ class WebSearchHandler:
     _REQUIRED_KEYS = frozenset(("name", "url"))
 
     # Optional metadata, read by the shortcuts screen to document itself.
-    # `prefixes` is set per-instance below, since the engine set is
-    # user-configurable via settings.toml.
-    description = "Search the web — one prefix per configured engine"
+    # `prefixes` and `prefix_help` are set per-instance below, since the
+    # engine set is user-configurable via settings.toml.
+    description = "Search the web"
     example = "?wayland layer shell"
 
     def __init__(self, engines: dict = None):
         self.engines = self._validate_engines(engines) if engines else DEFAULT_ENGINES
         self.prefixes = list(self.engines.keys())
+
+        # Per-prefix labels for the shortcuts screen. Without these every
+        # engine row read "Search the web", which is useless — the whole
+        # question a user has here is *which* engine `gh:` is.
+        self.prefix_help = {
+            prefix: f"Search {engine.get('name', prefix)}"
+            for prefix, engine in self.engines.items()
+        }
 
     @classmethod
     def _validate_engines(cls, engines: dict) -> dict:

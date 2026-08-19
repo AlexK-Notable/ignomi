@@ -37,7 +37,8 @@ class SystemControlsHandler:
 
     # Optional metadata, read by the shortcuts screen to document itself.
     # Keyword-triggered rather than prefixed, hence no `prefixes`.
-    description = "Inline volume / brightness sliders — type the keyword"
+    trigger_label = "volume"
+    description = "Inline sliders — also: brightness, mute, sound, screen"
     example = "volume"
 
     def _audio_available(self) -> bool:

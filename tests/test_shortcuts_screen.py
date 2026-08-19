@@ -11,7 +11,8 @@ from screens.shortcuts import KEY_BINDINGS, ShortcutsScreen
 
 
 class FakeHandler:
-    def __init__(self, name, priority=100, prefixes=None, description="", example=""):
+    def __init__(self, name, priority=100, prefixes=None, description="",
+                 example="", prefix_help=None, trigger_label=""):
         self.name = name
         self.priority = priority
         if prefixes is not None:
@@ -20,6 +21,10 @@ class FakeHandler:
             self.description = description
         if example:
             self.example = example
+        if prefix_help is not None:
+            self.prefix_help = prefix_help
+        if trigger_label:
+            self.trigger_label = trigger_label
 
 
 class FakeRouter:
@@ -143,6 +148,141 @@ def test_no_router_degrades_to_empty_rather_than_raising():
 
     assert prefixed == []
     assert unprefixed == []
+
+
+# --- Per-prefix help (which engine is `gh:`?) -------------------------------
+
+def test_each_prefix_gets_its_own_description_when_prefix_help_is_given():
+    """The reported bug: five web rows all said "Search the web".
+
+    Knowing that `gh:` exists is useless without knowing it is GitHub.
+    """
+    router = FakeRouter([
+        FakeHandler(
+            "web_search",
+            prefixes=["?", "g:", "gh:"],
+            description="Search the web",
+            prefix_help={
+                "?": "Search Kagi",
+                "g:": "Search Google",
+                "gh:": "Search GitHub",
+            },
+        ),
+    ])
+
+    prefixed, _ = ShortcutsScreen(router=router)._split_handlers()
+
+    assert prefixed == [
+        ("?…", "Search Kagi"),
+        ("g:…", "Search Google"),
+        ("gh:…", "Search GitHub"),
+    ]
+
+
+def test_prefix_missing_from_prefix_help_falls_back_to_description():
+    router = FakeRouter([
+        FakeHandler(
+            "web_search",
+            prefixes=["?", "x:"],
+            description="Search the web",
+            prefix_help={"?": "Search Kagi"},
+        ),
+    ])
+
+    prefixed, _ = ShortcutsScreen(router=router)._split_handlers()
+
+    assert prefixed[1] == ("x:…", "Search the web")
+
+
+def test_real_web_search_handler_names_every_engine():
+    """Against the real handler and its real default engine set."""
+    from search.handlers.web_search import WebSearchHandler
+
+    router = FakeRouter([WebSearchHandler()])
+
+    prefixed, _ = ShortcutsScreen(router=router)._split_handlers()
+    by_prefix = dict(prefixed)
+
+    assert by_prefix["?…"] == "Search Kagi"
+    assert by_prefix["g:…"] == "Search Google"
+    assert by_prefix["w:…"] == "Search Wikipedia"
+    assert by_prefix["gh:…"] == "Search GitHub"
+    assert by_prefix["yt:…"] == "Search YouTube"
+
+
+def test_web_engine_names_follow_user_configured_engines():
+    """Engines are user-configurable, so the labels must track them."""
+    from search.handlers.web_search import WebSearchHandler
+
+    handler = WebSearchHandler(engines={
+        "d:": {"name": "DuckDuckGo", "url": "https://duckduckgo.com/?q={query}"},
+    })
+    prefixed, _ = ShortcutsScreen(router=FakeRouter([handler]))._split_handlers()
+
+    assert prefixed == [("d:…", "Search DuckDuckGo")]
+
+
+# --- trigger_label (the "firefox" bug) --------------------------------------
+
+def test_trigger_label_beats_example_for_unprefixed_handlers():
+    """The reported bug: app search showed "firefox" as if it were a command.
+
+    The fallback handler is triggered by *any* text, so that is what the
+    key column has to say.
+    """
+    router = FakeRouter([
+        FakeHandler(
+            "app_search",
+            description="Search installed applications (e.g. firefox)",
+            example="firefox",
+            trigger_label="any text",
+        ),
+    ])
+
+    _, unprefixed = ShortcutsScreen(router=router)._split_handlers()
+
+    assert unprefixed == [
+        ("any text", "Search installed applications (e.g. firefox)")
+    ]
+    assert unprefixed[0][0] != "firefox"
+
+
+def test_real_app_search_handler_says_any_text_not_firefox():
+    """Against the real handler, since that is what the user saw."""
+    from search.handlers.app_search import AppSearchHandler
+
+    router = FakeRouter([AppSearchHandler()])
+
+    _, unprefixed = ShortcutsScreen(router=router)._split_handlers()
+
+    assert len(unprefixed) == 1
+    left, right = unprefixed[0]
+    assert left == "any text"
+    assert "firefox" in right          # kept, but as an example
+    assert not right.startswith("Default")
+
+
+def test_real_controls_handler_names_its_other_keywords():
+    """`volume` alone hid that brightness and mute also work."""
+    from search.handlers.controls import SystemControlsHandler
+
+    router = FakeRouter([SystemControlsHandler()])
+
+    _, unprefixed = ShortcutsScreen(router=router)._split_handlers()
+
+    _, right = unprefixed[0]
+    assert "brightness" in right
+    assert "mute" in right
+
+
+def test_example_is_still_used_when_no_trigger_label_is_declared():
+    router = FakeRouter([
+        FakeHandler("controls", description="Sliders", example="volume"),
+    ])
+
+    _, unprefixed = ShortcutsScreen(router=router)._split_handlers()
+
+    assert unprefixed == [("volume", "Sliders")]
 
 
 # --- Screen documentation ---------------------------------------------------

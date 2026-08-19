@@ -160,18 +160,29 @@ class ShortcutsScreen:
             description = getattr(handler, "description", "") or handler.name
             example = getattr(handler, "example", "")
             prefixes = getattr(handler, "prefixes", None)
+            # Optional per-prefix labels. Web search declares five
+            # prefixes; without these each row said "Search the web",
+            # which answers nothing — the actual question is *which*
+            # engine `gh:` is.
+            prefix_help = getattr(handler, "prefix_help", None) or {}
 
             if prefixes:
-                # One row per prefix so every trigger is discoverable —
-                # web search declares five and they are not guessable.
+                # One row per prefix so every trigger is discoverable.
                 for prefix in prefixes:
-                    label = f"{prefix}…"
-                    right = description
-                    if example and example.startswith(prefix):
-                        right = f"{description}   (e.g. {example})"
-                    prefixed.append((label, right))
+                    right = prefix_help.get(prefix) or description
+                    if (
+                        prefix not in prefix_help
+                        and example
+                        and example.startswith(prefix)
+                    ):
+                        right = f"{description}  (e.g. {example})"
+                    prefixed.append((f"{prefix}…", right))
             else:
-                left = example or handler.name
+                # `trigger_label` describes what to type. Falling back to
+                # `example` would print "firefox" in the key column and
+                # read as though firefox were a special command, rather
+                # than an example of the any-text fallback.
+                left = getattr(handler, "trigger_label", "") or example or handler.name
                 unprefixed.append((left, description))
 
         return prefixed, unprefixed
@@ -213,8 +224,16 @@ class ShortcutsScreen:
 
     @staticmethod
     def _row(left: str, right: str):
+        """One reference row: what to type, and what it does.
+
+        The description **wraps** rather than ellipsizing. This is a
+        reference screen — a description cut off at the panel edge fails
+        at the one job the screen has. Wrapping costs a little height and
+        the panel scrolls; truncating loses the information entirely.
+        """
         return widgets.Box(
             spacing=12,
+            valign="start",
             css_classes=["shortcuts-row"],
             child=[
                 widgets.Label(
@@ -222,16 +241,19 @@ class ShortcutsScreen:
                     css_classes=["shortcuts-key"],
                     xalign=0,
                     halign="start",
-                    width_chars=14,
+                    valign="start",
+                    width_chars=12,
                 ),
                 widgets.Label(
                     label=right,
                     css_classes=["shortcuts-desc"],
                     xalign=0,
                     halign="start",
+                    valign="start",
                     hexpand=True,
-                    ellipsize="end",
-                    max_width_chars=56,
+                    wrap=True,
+                    wrap_mode="word",
+                    max_width_chars=48,
                 ),
             ],
         )
