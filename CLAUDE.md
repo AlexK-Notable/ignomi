@@ -266,3 +266,12 @@ See `project-docs/discoveries/systematic-debugging-phase1-theming.md` for the sy
 **Most critical references:**
 - `project-docs/research/gtk4-layer-shell-transparency.md` — GTK4 transparency patterns (essential for any Layer Shell work).
 - `project-docs/architecture/2025-11-02-ignomi-launcher-design.md` — Original design rationale.
+
+<!-- self-learn:pointers:begin (do not hand-edit inside; managed by self-learn) -->
+## Reference material (self-learn)
+
+Captured lessons that are NOT loaded into this context. Read the file whose
+subject matches what you are about to do, before you start.
+
+- `references/LEARNINGS.md` — captured lessons for this project
+<!-- self-learn:pointers:end -->
